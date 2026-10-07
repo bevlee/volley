@@ -1,56 +1,36 @@
-# sv
+# Volley
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A 2v2 beach volleyball dice game in the browser. You call the shots, the dice decide the rally.
 
-## Creating a project
+## What it is
 
-If you're seeing this, you've probably already done this step. Congrats!
+Two teams of two play to 21, win by 2. Every rally runs like real beach volleyball: serve, pass, set, attack, then block and dig. Each touch is a dice roll, and the quality of one touch carries into the next.
 
-```sh
-# create a new project
-npx sv create my-app
-```
+The game is a guessing duel:
 
-To recreate this project with the same configuration:
+- **On attack** you pick the shot: **line**, **cross** or a **tip**.
+- **On defence** you pick where your **blocker** goes (line or cross) and whether your **defender** plays **deep** or creeps **short** for the tip.
 
-```sh
-# recreate this project
-npx sv@1.1.0 create --template minimal --types ts --add vitest="usages:unit" --install npm .
-```
+Read the other side right and you stuff the block or dig the ball. Guess wrong and it's a kill. The court shows every roll, the ball's flight, and pop-up calls for the big moments: kills, stuff blocks and dive saves. A plain-English commentary log follows the rally.
 
-## Adding features
+## Run it
 
-Add features to your project with `sv add`:
+You need [Node.js](https://nodejs.org/) 22.17 or newer.
 
 ```sh
-npx sv add
-```
-
-For example, to add Tailwind CSS:
-
-```sh
-npx sv add tailwindcss
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+Then open http://localhost:5173. Press **Space** to play each step, or use the buttons. If `npm install` fails with `Cannot read properties of null (reading 'edgesOut')`, run `npx npm@11 install` instead.
 
-To create a production version of your app:
+Other scripts:
 
 ```sh
-npm run build
+npm test       # run the tests
+npm run sim    # simulate 1,000 games and print balance stats
 ```
 
-You can preview the production build with `npm run preview`.
+## Built with
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+[SvelteKit](https://svelte.dev/docs/kit) and TypeScript, with [Vitest](https://vitest.dev/) for tests. The game rules live in a plain TypeScript engine in `src/lib/engine/`, and the design notes are in `docs/plans/`.
