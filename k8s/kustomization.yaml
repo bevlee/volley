@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Single entry point for Skaffold, which rewrites the image to the tag it
+# built. The namespace is declared first for first installs.
+resources:
+  - namespace.yaml
+  - service.yaml
+  - deployment.yaml
+  - certificate.yaml
+  - ingress.yaml

@@ -1,0 +1,8 @@
+# Dev servers send unbundled, uncompressed modules; gzip at Traefik cuts that a lot.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: compress
+  namespace: volley-dev
+spec:
+  compress: {}

@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: volley
+  namespace: volley-dev
+  labels:
+    app: volley
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  # Recreate so a redeploy never leaves two dev servers behind the ingress.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: volley
+  template:
+    metadata:
+      labels:
+        app: volley
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: volley
+          # Bare artifact name so Skaffold rewrites it to the tag it builds.
+          image: docker.io/bevdev1/volley
+          # The :dev tag is reused, so always pull.
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 5173
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            # The dev server writes caches and Skaffold syncs source files in,
+            # so the root filesystem stays writable in dev.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          # Dev servers compile on the first request, so give it time before probing.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 6

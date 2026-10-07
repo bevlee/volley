@@ -1,0 +1,15 @@
+# Single-host cert, like prod: http01 can't issue wildcards, and a wildcard
+# per dev namespace would also count against Let's Encrypt's duplicate-cert limit.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: volley-dev
+  namespace: volley-dev
+spec:
+  commonName: volley-dev.bevsoft.com
+  dnsNames:
+    - volley-dev.bevsoft.com
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  secretName: volley-dev-tls

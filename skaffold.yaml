@@ -1,0 +1,52 @@
+apiVersion: skaffold/v4beta14
+kind: Config
+metadata:
+  name: volley
+build:
+  # `git describe --tags`: v0.2.0 on a tagged commit, v0.2.0-3-gabc1234 three
+  # commits later, with -dirty for uncommitted changes.
+  tagPolicy:
+    gitCommit:
+      variant: Tags
+  artifacts:
+    - image: docker.io/bevdev1/volley
+      docker:
+        dockerfile: Dockerfile
+deploy:
+  kubectl:
+    defaultNamespace: volley
+manifests:
+  kustomize:
+    paths:
+      - k8s
+
+profiles:
+  # `skaffold dev` turns this on automatically; `skaffold run` stays on the
+  # production image above. Runs the dev server in volley-dev at
+  # https://volley-dev.bevsoft.com, syncing edits into the pod for hot reload.
+  - name: dev
+    activation:
+      - command: dev
+    build:
+      tagPolicy:
+        envTemplate:
+          template: dev
+      artifacts:
+        - image: docker.io/bevdev1/volley
+          docker:
+            dockerfile: Dockerfile.dev
+          # Source and static assets are copied into the running pod; anything
+          # else (package.json, config files) triggers a full image rebuild.
+          sync:
+            manual:
+              - src: "src/**"
+                dest: .
+              - src: "static/**"
+                dest: .
+    manifests:
+      kustomize:
+        paths:
+          - k8s-dev
+    deploy:
+      kubectl:
+        defaultNamespace: volley-dev

@@ -1,0 +1,17 @@
+# Dev image for `skaffold dev`: runs the Vite dev server so edits under src/
+# and static/ are synced into the pod and hot-reloaded, with no image rebuild.
+FROM docker.io/node:26-bookworm-slim
+WORKDIR /app
+
+# Owned by the unprivileged node user so Skaffold's file sync and Vite's
+# caches can write here.
+RUN chown node:node /app
+USER node
+
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci
+
+COPY --chown=node:node . .
+
+EXPOSE 5173
+CMD ["npx", "vite", "dev", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]

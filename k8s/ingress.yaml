@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: volley-ingress
+  namespace: volley
+  labels:
+    app: volley
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - volley.bevsoft.com
+      secretName: volley-tls
+  rules:
+    - host: volley.bevsoft.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: volley
+                port:
+                  number: 80
