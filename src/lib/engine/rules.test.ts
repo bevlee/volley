@@ -3,10 +3,12 @@ import { config } from './config';
 import {
 	accuracy,
 	adjacent,
+	aimResult,
 	blockResult,
 	defenderZone,
 	digTotal,
 	distance,
+	firstTouch,
 	gameWinner,
 	isGuaranteedKill,
 	isRead,
@@ -35,6 +37,17 @@ describe('ladder', () => {
 		[0, -4],
 		[-3, -7]
 	])('total %i gives %i', (total, mod) => expect(ladder(total)).toBe(mod));
+});
+
+describe('firstTouch', () => {
+	it.each([
+		[1, -2],
+		[2, -1],
+		[3, 0],
+		[4, 0],
+		[5, 1],
+		[6, 2]
+	])('a pass or dig roll of %i gives %i', (die, mod) => expect(firstTouch(die)).toBe(mod));
 });
 
 describe('power', () => {
@@ -84,6 +97,27 @@ describe('landing', () => {
 	it('breaks ties with the tie picker', () =>
 		// tip target 3 has neighbours 2, 4, 6, all one step from a short defender in 3
 		expect(landing('tip', 5, 3, (zones) => Math.max(...zones) as Zone)).toBe(6));
+
+	it('keeps a hard shot that went into the block on its target, for if it gets through', () =>
+		expect(landing('line', config.accuracyIntoBlock, 5, noTie)).toBe(1));
+});
+
+describe('aimResult', () => {
+	it.each([
+		[9, 'exact'],
+		[8, 'exact'],
+		[7, 'drift'],
+		[5, 'drift'],
+		[4, 'block'],
+		[3, 'block'],
+		[2, 'easy'],
+		[-1, 'easy']
+	])('a hard shot aimed %i is %s', (acc, result) => expect(aimResult('cross', acc)).toBe(result));
+
+	it('lets a tip drift instead, since it goes over the block', () => {
+		expect(aimResult('tip', 4)).toBe('drift');
+		expect(aimResult('tip', 2)).toBe('easy');
+	});
 });
 
 describe('reads', () => {

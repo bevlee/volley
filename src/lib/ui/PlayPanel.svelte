@@ -2,12 +2,7 @@
 	import type { Game } from '#lib/engine/types.ts';
 	import { callout, duels, narrate, playSummary, stepEntries } from './story';
 
-	/** `choosing`: it's the player's attack, so the panel explains the three shots. */
-	let {
-		game,
-		choosing = false,
-		defending = false
-	}: { game: Game; choosing?: boolean; defending?: boolean } = $props();
+	let { game }: { game: Game } = $props();
 
 	const entries = $derived(stepEntries(game));
 	const calls = $derived(entries.find((e) => e.tag === 'calls'));
@@ -21,19 +16,7 @@
 </script>
 
 <section class="panel" aria-live="polite">
-	{#if choosing && game.attack}
-		<p class="kicker">Your attack · {game.teams[game.attack.team][game.attack.hitter].name}</p>
-		<p class="choice"><b>Line</b> hard, straight down the sideline</p>
-		<p class="choice"><b>Cross</b> hard, angled across the court</p>
-		<p class="choice"><b>Tip</b> soft, over the block into the short middle</p>
-	{:else if defending && game.attack}
-		{@const a = game.attack}
-		{@const mine = game.teams[a.team === 'A' ? 'B' : 'A']}
-		<p class="kicker">Your defence · {game.teams[a.team][a.hitter].name} is about to attack</p>
-		<p class="choice"><b>Block</b> {mine.blocker.name} takes away the line or the cross</p>
-		<p class="choice"><b>Deep</b> {mine.defender.name} covers the other hard shot</p>
-		<p class="choice"><b>Short</b> {mine.defender.name} creeps in for the tip</p>
-	{:else if calls}
+	{#if calls}
 		{@const d = calls.data ?? {}}
 		{@const [attack, block, defend] = narrate(calls).split(' · ')}
 		<p class="kicker">The play</p>
@@ -67,12 +50,9 @@
 
 <style>
 	.panel {
-		/* A fixed height that fits the play preview or two matchups, so the court never jumps. */
-		height: 124px;
-		overflow: hidden;
+		min-height: 60px;
 		box-sizing: border-box;
 		padding: 8px 12px;
-		margin-bottom: 8px;
 		border: 1px solid var(--border);
 		border-radius: 10px;
 		background: var(--surface);
@@ -99,9 +79,6 @@
 		line-clamp: 2;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
-	}
-	.choice {
-		font-size: 0.85rem;
 	}
 	.line {
 		font-weight: 600;

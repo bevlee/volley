@@ -4,16 +4,25 @@
 	--text: #1f1f1c;
 	--muted: #6b6a64;
 	--border: #d9d7cf;
-	--team-a: #0f6e56;
-	--team-a-bg: #e1f5ee;
-	--team-b: #993c1d;
-	--team-b-bg: #faece7;
+	--team-a: #185fa5;
+	--team-a-bg: #e6f1fb;
+	--team-b: #1f1f1c;
+	--team-b-bg: #e4e2da;
 	--landing: #fbd99a;
 	--actual: #ba7517;
 	--die-low: #f7c1c1;
 	--die-high: #c0dd97;
 	--block: #534ab7;
-	--ball: #ef9f27;
+	--ball: #ffd23f;
+	--ball-panel: #1c6dd0;
+	--ball-edge: #2c2c2a;
+	/* The trace around the half where a point landed: neutral, so it reads as "here", not as a team. */
+	--point: #f07a1a;
+	/* Covered (blocked or dug) is red, open is green: the open zone is the one to aim at. */
+	--covered: #a32d2d;
+	--covered-bg: #f7c1c1;
+	--open: #3b6d11;
+	--open-bg: #c0dd97;
 	color-scheme: light dark;
 	font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
 	line-height: 1.5;
@@ -26,15 +35,22 @@
 		--text: #ecebe6;
 		--muted: #a3a29b;
 		--border: #3d3d3a;
-		--team-a: #5dcaa5;
-		--team-a-bg: #0b3d31;
-		--team-b: #f0997b;
-		--team-b-bg: #4a1b0c;
+		--team-a: #85b7eb;
+		--team-a-bg: #0c447c;
+		/* The black team reads as light grey on a dark court. */
+		--team-b: #d3d1c7;
+		--team-b-bg: #444441;
 		--landing: #5c3d0c;
 		--actual: #ef9f27;
 		--die-low: #791f1f;
 		--die-high: #27500a;
 		--block: #afa9ec;
+		--ball-edge: #f1efe8;
+		--point: #ff9a3c;
+		--covered: #f09595;
+		--covered-bg: #791f1f;
+		--open: #97c459;
+		--open-bg: #27500a;
 	}
 }
 

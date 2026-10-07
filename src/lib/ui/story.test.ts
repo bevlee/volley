@@ -3,7 +3,7 @@ import { fixedChoosers } from '../engine/choosers';
 import { newGame, step } from '../engine/rally';
 import { scriptedDice } from '../engine/rng';
 import type { Calls, Game } from '../engine/types';
-import { callout, duels, narrate, needsDefence, needsShot, nextAction, playerActions, playSummary, stepEntries } from './story';
+import { callout, duels, narrate, needsDefence, needsShot, nextAction, playerActions, playsItself, playSummary, statusLine, stepEntries } from './story';
 
 function evenGame(): Game {
 	const g = newGame(1);
@@ -34,57 +34,49 @@ describe('callout', () => {
 		expect(callout(run(2, line, [4, 4]))).toBeNull();
 	});
 
-	it('calls a stuff block, and a big one "Roofed!"', () => {
-		// block 13 vs attack 9
-		expect(callout(run(4, line, [4, 4, 2, 2, 4, 6]))).toMatchObject({ text: 'Stuff block!', team: 'B', epic: true });
-		// block 13 vs attack 7
-		expect(callout(run(4, line, [4, 4, 1, 1, 4, 6]))?.text).toBe('Roofed!');
+	it('calls a stuff "Block!", however big', () => {
+		// block 13 vs attack 10
+		expect(callout(run(4, line, [4, 4, 2, 4, 6]))).toMatchObject({ text: 'Block!', sub: 'B1 blocks A1', team: 'B', epic: true });
+		// set 3 → −1, attack 4 + 1 − 1 + (4 + 3)/2 = 7: block 13 vs 7
+		expect(callout(run(4, line, [4, 3, 1, 5, 6]))?.text).toBe('Block!');
 	});
 
-	it('calls a kill, and a big one "Crushed!"', () => {
+	it('calls every kill "Kill!", shaking the court for a big one', () => {
 		// attack 13 vs dig 7 from a defender caught short
-		const kill = callout(run(4, crossPastBlock('short'), [4, 4, 5, 4, 5, 6]));
+		const kill = callout(run(4, crossPastBlock('short'), [4, 4, 5, 5, 6]));
 		expect(kill).toMatchObject({ text: 'Kill!', team: 'A', epic: false });
 		expect(kill?.sub).toMatch(/out of position/);
 		// attack 13 vs dig 2
-		expect(callout(run(4, crossPastBlock('short'), [4, 4, 5, 4, 5, 1]))).toMatchObject({ text: 'Crushed!', epic: true });
+		expect(callout(run(4, crossPastBlock('short'), [4, 4, 5, 5, 1]))).toMatchObject({ text: 'Kill!', epic: true });
+		// a tip that falls in: tip 7 vs a deep defender's dig 3
+		expect(callout(run(4, tip('deep'), [4, 4, 3, 4, 2]))).toMatchObject({ text: 'Kill!', sub: 'A1 tips it in', team: 'A' });
+		// a perfect set and hit
+		expect(callout(run(4, line, [4, 6, 6]))).toMatchObject({ text: 'Kill!', sub: 'Perfect set, perfect hit', team: 'A', epic: true });
 	});
 
-	it('calls a tip that falls in', () => {
-		// tip 7 vs a deep defender's dig 3
-		expect(callout(run(4, tip('deep'), [4, 4, 3, 4, 2]))).toMatchObject({ text: 'Tip kill!', team: 'A' });
+	it('calls every dig "Dig!"', () => {
+		expect(callout(run(4, tip('short'), [6, 4, 3, 4, 5]))).toMatchObject({ text: 'Dig!', sub: 'B2 dives for the tip', team: 'B', epic: true });
+		// cross 10 into a deep defender on the spot: dig 4 + 6 + 3 = 13
+		expect(callout(run(4, crossPastBlock('deep'), [4, 4, 2, 4, 6]))).toMatchObject({ text: 'Dig!', sub: 'B2 reads it', team: 'B' });
 	});
 
-	it('calls a dive when a short defender saves the tip', () => {
-		expect(callout(run(4, tip('short'), [6, 4, 3, 4, 5]))).toMatchObject({ text: 'Dive save!', team: 'B', epic: true });
+	it('calls a block touch "Block touch"', () => {
+		expect(callout(run(4, line, [4, 4, 4, 4, 5]))).toMatchObject({ text: 'Block touch', team: 'B' });
 	});
 
-	it('calls a routine dig "Dig!"', () => {
-		// cross 9 into a deep defender on the spot: dig 4 + 6 + 1 = 11
-		expect(callout(run(4, crossPastBlock('deep'), [4, 4, 2, 2, 4, 6]))).toMatchObject({ text: 'Dig!', team: 'B' });
-	});
-
-	it('calls a block touch', () => {
-		expect(callout(run(4, line, [4, 4, 4, 4, 4, 5]))).toMatchObject({ text: 'Touched!', team: 'B' });
-	});
-
-	it('calls a guaranteed kill "Unstoppable!"', () => {
-		expect(callout(run(4, line, [4, 6, 6]))).toMatchObject({ text: 'Unstoppable!', team: 'A', epic: true });
-	});
-
-	it('calls a set error and a hitting error in volleyball words', () => {
-		expect(callout(run(2, line, [1, 1]))).toMatchObject({ text: 'Set error!', team: 'B' });
+	it('calls two natural 1s an error', () => {
+		expect(callout(run(2, line, [1, 1]))).toMatchObject({ text: 'Error!', team: 'B' });
 		// pass 4, set 1, power die 1
-		expect(callout(run(4, line, [4, 1, 1]))).toMatchObject({ text: 'Hitting error!', team: 'B' });
+		expect(callout(run(4, line, [4, 1, 1]))).toMatchObject({ text: 'Error!', sub: 'A1 hits it into the net', team: 'B' });
 	});
 
-	it('says the short defender dove but missed when a tip still falls in', () => {
-		// tip 7 vs dig 4 + 1 + 1 = 6
-		expect(callout(run(4, tip('short'), [4, 4, 3, 4, 1]))?.sub).toMatch(/dives but can't reach it/);
+	it('says the short defender couldn’t reach a tip that still falls in', () => {
+		// set 6 → +2, tip 4 + 5 + 2 = 11 vs dig 4 + 1 + 3 = 8
+		expect(callout(run(4, tip('short'), [4, 6, 5, 2, 1]))?.sub).toBe("B2 can't reach the tip");
 	});
 
 	it('keeps callout captions short', () => {
-		for (const dice of [[4, 4, 5, 4, 5, 6], [4, 4, 5, 4, 5, 1]]) {
+		for (const dice of [[4, 4, 5, 5, 6], [4, 4, 5, 5, 1]]) {
 			expect(callout(run(4, crossPastBlock('short'), dice))!.sub.length).toBeLessThanOrEqual(34);
 		}
 	});
@@ -102,7 +94,7 @@ describe('callout', () => {
 
 describe('narrate', () => {
 	it('describes each step in volleyball terms', () => {
-		const g = run(4, line, [6, 4, 2, 2, 4, 6]);
+		const g = run(4, line, [6, 4, 2, 4, 6]);
 		expect(g.log.map(narrate)).toEqual([
 			'B2 to serve',
 			'B2 serves to Team A',
@@ -111,17 +103,56 @@ describe('narrate', () => {
 			'A1 is going down the line · B1 takes away the line · B2 stays deep',
 			'A1 swings down the line',
 			'Right where they wanted it',
-			// attack 8 + (4 + 2) / 2 = 11 vs block 13: inside the margin
-			'B1 gets a touch on it',
-			'Free ball to Team B'
+			// attack 8 + (4 + 4) / 2 = 12 vs block 13: inside the margin. The touch is B's first contact.
+			'Block touch by B1'
 		]);
+	});
+});
+
+describe('narrate a pass', () => {
+	it('grades it from the first-touch bonus', () => {
+		const pass = (die: number) => narrate(run(1, line, [die]).log.at(-1)!);
+		expect([6, 5, 3, 2, 1].map(pass)).toEqual([
+			'Perfect pass from A1',
+			'Good pass from A1',
+			'Good pass from A1',
+			'Shaky pass from A1',
+			'Poor pass from A1'
+		]);
+	});
+});
+
+describe('narrate a shot aimed into the block', () => {
+	it('says it went straight into the block', () => {
+		// cross past a line block, aim 4 → into the block, block 13 vs 10 → stuff
+		const g = run(4, crossPastBlock('deep'), [4, 3, 4, 1, 6]);
+		expect(stepEntries(g).map(narrate).slice(1, 3)).toEqual(['Straight into the block', 'Block by B1!']);
+	});
+});
+
+describe('narrate a dig', () => {
+	it('grades it from the dig roll, like a pass', () => {
+		// cross into a deep defender on the spot, dig die 6 → Perfect
+		const dug = run(4, crossPastBlock('deep'), [4, 4, 2, 4, 6]);
+		expect(narrate(dug.log.at(-1)!)).toBe('Perfect dig from B2');
+		// a read tip, dig die 5 → Good
+		const saved = run(4, tip('short'), [6, 4, 3, 4, 5]);
+		expect(narrate(saved.log.at(-1)!)).toBe('Good dig from B2, diving for the tip');
+	});
+});
+
+describe('narrate a set off a block touch', () => {
+	it('says it came off the block', () => {
+		// set die 6 − 1 for the missing pass = 5 → good, not perfect
+		const g = run(5, line, [6, 4, 2, 4, 6, 6]);
+		expect(narrate(g.log[g.log.length - 1])).toBe('Good set from B2 off the block');
 	});
 });
 
 describe('narrate a stuff', () => {
 	it('names the blocker and the point', () => {
-		const g = run(4, line, [4, 4, 2, 2, 4, 6]);
-		expect(stepEntries(g).map(narrate).slice(-2)).toEqual(['B1 stuffs it!', 'Point Team B · stuff block · 0–1']);
+		const g = run(4, line, [4, 4, 2, 4, 6]);
+		expect(stepEntries(g).map(narrate).slice(-2)).toEqual(['Block by B1!', 'Point Team B · block · 0–1']);
 	});
 });
 
@@ -137,9 +168,10 @@ describe('nextAction', () => {
 		const g = evenGame();
 		expect(nextAction(g)).toBe('Pass');
 		expect(nextAction(run(1, line, [4]))).toBe('Set');
-		expect(nextAction(run(2, line, [4, 4]))).toBe('Call the play');
+		// Space at the call reveals both sides' calls and rolls the attack in one go
+		expect(nextAction(run(2, line, [4, 4]))).toBe('Attack!');
 		expect(nextAction(run(3, line, [4, 4]))).toBe('Attack!');
-		expect(nextAction(run(4, line, [4, 4, 2, 2, 4, 6]))).toBe('Next rally');
+		expect(nextAction(run(4, line, [4, 4, 2, 4, 6]))).toBe('Next rally');
 	});
 
 	it('asks you to choose when it’s your team’s attack', () => {
@@ -161,11 +193,25 @@ describe('nextAction', () => {
 	});
 });
 
+describe('playsItself', () => {
+	it('runs the serve, pass and set on its own, and waits at the call and at the end of a point', () => {
+		const start = newGame(1);
+		expect(playsItself(start)).toBe(true); // serve
+		expect(playsItself(run(0, line, []))).toBe(true); // pass
+		expect(playsItself(run(1, line, [4]))).toBe(true); // set
+		expect(playsItself(run(2, line, [4, 4]))).toBe(false); // the call
+		expect(playsItself(run(4, line, [4, 4, 2, 4, 6]))).toBe(false); // point over
+		// the set after a dig or a block touch plays itself too
+		expect(playsItself(run(4, tip('short'), [6, 4, 3, 4, 5]))).toBe(true);
+		expect(playsItself(run(4, line, [4, 4, 4, 4, 5]))).toBe(true);
+	});
+});
+
 describe('playerActions', () => {
 	it('has the hitter spike and the blocker jump', () => {
-		expect(playerActions(run(4, line, [4, 4, 2, 2, 4, 6]))).toEqual({
+		expect(playerActions(run(4, line, [4, 4, 2, 4, 6]))).toEqual({
 			'A-blocker': { move: 'spike', label: 'spike!' },
-			'B-blocker': { move: 'block', label: 'stuff!' }
+			'B-blocker': { move: 'block', label: 'block!' }
 		});
 	});
 
@@ -177,15 +223,15 @@ describe('playerActions', () => {
 	});
 
 	it('has a defender on the spot dig without diving', () => {
-		expect(playerActions(run(4, crossPastBlock('deep'), [4, 4, 2, 2, 4, 6]))).toEqual({
+		expect(playerActions(run(4, crossPastBlock('deep'), [4, 4, 2, 4, 6]))).toEqual({
 			'A-blocker': { move: 'spike', label: 'spike!' },
 			'B-defender': { move: 'dig', label: 'dig!' }
 		});
 	});
 
 	it('shows a beaten block and a dig that comes too late', () => {
-		// block 8 vs 15 → through, dig 7 vs 15 → kill
-		expect(playerActions(run(4, line, [4, 4, 6, 6, 4, 1, 6]))).toMatchObject({
+		// block 8 vs 14 → through, dig 7 vs 14 → kill
+		expect(playerActions(run(4, line, [4, 4, 6, 4, 1, 6]))).toMatchObject({
 			'B-blocker': { move: 'block', label: 'beaten' },
 			'B-defender': { move: 'dive', label: 'too late' }
 		});
@@ -198,21 +244,21 @@ describe('playerActions', () => {
 
 describe('duels', () => {
 	it('shows attack against block for a stuff', () => {
-		expect(duels(run(4, line, [4, 4, 2, 2, 4, 6]))).toEqual([
-			{ attacker: 'A1 attack', attack: 9, attackTeam: 'A', defender: 'B1 block', defence: 13, defenceTeam: 'B', verdict: 'Stuffed', attackWins: false }
+		expect(duels(run(4, line, [4, 4, 2, 4, 6]))).toEqual([
+			{ attacker: 'A1 attack', attack: 10, attackTeam: 'A', defender: 'B1 block', defence: 13, defenceTeam: 'B', verdict: 'Block', attackWins: false }
 		]);
 	});
 
 	it('shows attack against block, then against the dig, when the ball gets through', () => {
-		expect(duels(run(4, line, [4, 4, 6, 6, 4, 1, 6])).map((d) => [d.defender, d.attack, d.defence, d.verdict])).toEqual([
-			['B1 block', 15, 8, 'Through'],
-			['B2 dig', 15, 7, 'Kill']
+		expect(duels(run(4, line, [4, 4, 6, 4, 1, 6])).map((d) => [d.defender, d.attack, d.defence, d.verdict])).toEqual([
+			['B1 block', 14, 8, 'Through'],
+			['B2 dig', 14, 7, 'Kill']
 		]);
 	});
 
 	it('shows a tip against the dig', () => {
 		expect(duels(run(4, tip('short'), [6, 4, 3, 4, 5]))).toMatchObject([
-			{ attacker: 'A1 tip', attack: 9, defender: 'B2 dig', defence: 10, verdict: 'Saved', attackWins: false }
+			{ attacker: 'A1 tip', attack: 9, defender: 'B2 dig', defence: 12, verdict: 'Dig', attackWins: false }
 		]);
 	});
 
@@ -223,8 +269,8 @@ describe('duels', () => {
 
 describe('playSummary', () => {
 	it('says whether the hit went into, around or over the block', () => {
-		expect(playSummary(run(4, line, [4, 4, 2, 2, 4, 6]))).toBe('A1 down the line, into the block · B1 blocks line · B2 deep');
-		expect(playSummary(run(4, crossPastBlock('deep'), [4, 4, 2, 2, 4, 6]))).toBe(
+		expect(playSummary(run(4, line, [4, 4, 2, 4, 6]))).toBe('A1 down the line, into the block · B1 blocks line · B2 deep');
+		expect(playSummary(run(4, crossPastBlock('deep'), [4, 4, 2, 4, 6]))).toBe(
 			'A1 cross-court, around the block · B1 blocks line · B2 deep'
 		);
 		expect(playSummary(run(4, tip('short'), [6, 4, 3, 4, 5]))).toBe('A1 tips over the block · B1 blocks line · B2 short');
@@ -241,5 +287,19 @@ describe('errors on a tip', () => {
 		const g = run(4, tip('short'), [4, 1, 1]);
 		expect(stepEntries(g).map(narrate)[0]).toBe('A1 tips it into the net');
 		expect(playerActions(g)).toEqual({ 'A-blocker': { move: 'tip', label: 'tip!' } });
+	});
+});
+
+describe('statusLine', () => {
+	it('tells you when the call is yours', () => {
+		const atCalls = run(2, line, [4, 4]); // A is attacking
+		const hitter = atCalls.teams.A[atCalls.attack!.hitter].name;
+		expect(statusLine(atCalls, 'A')).toBe(`Your attack · ${hitter} is hitting`);
+		expect(statusLine(atCalls, 'B')).toBe(`Your defence · ${hitter} is about to attack`);
+	});
+
+	it('otherwise says what just happened', () => {
+		const g = run(1, line, [4]);
+		expect(statusLine(g, null)).toBe(narrate(g.log[g.log.length - 1]));
 	});
 });

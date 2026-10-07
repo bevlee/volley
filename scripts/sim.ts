@@ -28,7 +28,7 @@ console.log('\nHow points end');
 console.table(share('point', 'kind'));
 console.log('Accuracy');
 console.table(share('accuracy', 'result'));
-console.log('Block (hard shots into the blocked channel)');
+console.log('Block (hard shots down the blocked channel, or aimed into the block)');
 console.table(share('block', 'result'));
 
 console.log('Dig: share of balls kept up');

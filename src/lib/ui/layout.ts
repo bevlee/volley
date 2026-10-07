@@ -1,7 +1,7 @@
 import { config } from '../engine/config';
 import { other, partner } from '../engine/rally';
-import { defenderZone, GRID } from '../engine/rules';
-import type { Channel, Game, Roll, Slot, Stance, TeamId, Zone } from '../engine/types';
+import { defenderZone, GRID, isRead, TARGET, ZONES } from '../engine/rules';
+import type { Channel, Game, Roll, Shot, Slot, Stance, TeamId, Zone } from '../engine/types';
 import { stepEntries } from './story';
 
 /** SVG viewBox is 300 × 560: B's half 15–275, net 275–285, A's half 285–545. */
@@ -21,9 +21,32 @@ export function zoneBox(team: TeamId, zone: Zone) {
 	return { x: 15 + (2 - col) * COL, y: 145 - row * ROW, w: COL, h: ROW };
 }
 
+/** A team's whole half of the court: the box around its six zones. */
+export function halfBox(team: TeamId) {
+	const boxes = ZONES.map((z) => zoneBox(team, z));
+	const x = Math.min(...boxes.map((b) => b.x));
+	const y = Math.min(...boxes.map((b) => b.y));
+	return { x, y, w: Math.max(...boxes.map((b) => b.x + b.w)) - x, h: Math.max(...boxes.map((b) => b.y + b.h)) - y };
+}
+
 export function zoneCenter(team: TeamId, zone: Zone): Point {
 	const b = zoneBox(team, zone);
 	return { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+}
+
+/** How far inside the sideline a line shot runs. */
+const LINE_INSET = 12;
+
+/**
+ * Where a shot is drawn going to in a zone. A line shot runs straight down the sideline, so in the
+ * sideline column it sits just inside the line; anything else aims at the middle of the zone.
+ */
+export function shotPoint(team: TeamId, zone: Zone, shot: Shot): Point {
+	const c = zoneCenter(team, zone);
+	if (shot !== 'line' || GRID[zone][1] !== GRID[TARGET.line][1]) return c;
+	const b = zoneBox(team, zone);
+	// The line column is on the right of the screen for A and, mirrored, on the left for B.
+	return { x: team === 'A' ? b.x + b.w - LINE_INSET : b.x + LINE_INSET, y: c.y };
 }
 
 export type Positions = Record<TeamId, Record<Slot, Zone>>;
@@ -56,7 +79,7 @@ export function positions(g: Game): Positions {
 		pos[phase.team] = { ...RECEIVE };
 		return pos;
 	}
-	// A free ball mid-rally (block touch or mis-hit) keeps the attack's picture until the pass.
+	// A free ball mid-rally (an easy ball over) keeps the attack's picture until the pass.
 	if (!a) return pos;
 	const setter = partner(a.hitter);
 	if (phase.kind === 'set') {
@@ -67,7 +90,8 @@ export function positions(g: Game): Positions {
 				: { ...RECEIVE };
 	} else {
 		pos[a.team][a.hitter] = HIT_SPOT;
-		pos[a.team][setter] = SET_SPOT;
+		// After a dig on the setting spot the setter set from the net (see rollPositions), so they stay there.
+		pos[a.team][setter] = a.source === 'dig' && a.dugAt === SET_SPOT ? READY.blocker : SET_SPOT;
 	}
 	if (a.calls) {
 		const defending = other(a.team);
@@ -84,6 +108,15 @@ export function previewDefence(g: Game, block: Channel, stance: Stance): Positio
 	const defending = other(g.attack.team);
 	pos[defending] = { blocker: 2, defender: defenderZone(stance, block) };
 	return pos;
+}
+
+export type Cover = 'blocked' | 'read' | 'open';
+
+/** What a defence does to each shot: the blocker takes one hard shot, the defender reads another, one is open. */
+export function coverage(block: Channel, stance: Stance): Record<Shot, Cover> {
+	const cover = (shot: Shot): Cover =>
+		shot === block ? 'blocked' : isRead(shot, block, stance) ? 'read' : 'open';
+	return { line: cover('line'), cross: cover('cross'), tip: cover('tip') };
 }
 
 /** Where the players who roll in a step stand to roll: a setter moves to the setting spot first. */
@@ -144,6 +177,8 @@ export function ballAt(g: Game, pos: Positions): Point {
 	}
 	const a = g.attack;
 	if (!a) return { x: VIEW.width / 2, y: VIEW.netY };
+	// A touched ball stays up at the net with the blocker, ready for their partner to set.
+	if (g.phase.kind === 'touched') return zoneCenter(other(a.team), pos[other(a.team)].blocker);
 	// A stuffed ball drops straight back down on the hitter's side of the net.
 	if (stepEntries(g).some((e) => e.tag === 'point' && e.data?.kind === 'stuff')) return zoneCenter(a.team, 3);
 	if (a.landing) return zoneCenter(other(a.team), a.landing);

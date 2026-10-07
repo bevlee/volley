@@ -1,5 +1,7 @@
 import { other } from '../engine/rally';
-import type { Game, LogEntry, Shot, Slot, TeamId } from '../engine/types';
+import { firstTouch } from '../engine/rules';
+import type { Game, LogEntry, Phase, Shot, Slot, TeamId } from '../engine/types';
+import { setGrade, touchGrade } from './grades';
 
 /**
  * Turns the engine's log into volleyball language: plain commentary, pop-up callouts for big
@@ -20,15 +22,13 @@ export const SHOT_PHRASE: Record<Shot, string> = {
 	tip: 'for a tip'
 };
 
+/** One plain word per way a point ends: kill, block or error. */
 const POINT_REASON: Record<string, string> = {
 	kill: 'kill',
-	stuff: 'stuff block',
-	'guaranteed kill': 'unstoppable spike',
+	stuff: 'block',
+	'guaranteed kill': 'kill',
 	shank: 'error'
 };
-
-const quality = (mod: number, [great, good, shaky, poor]: string[]) =>
-	mod >= 2 ? great : mod >= 0 ? good : mod >= -2 ? shaky : poor;
 
 /** One plain-English line for a log entry. Falls back to the engine's own text. */
 export function narrate(e: LogEntry): string {
@@ -41,9 +41,9 @@ export function narrate(e: LogEntry): string {
 		case 'freeBall':
 			return d.start ? `Team ${d.team} receives the ball` : `Free ball to Team ${d.team}`;
 		case 'pass':
-			return `${quality(Number(d.mod), ['Perfect', 'Good', 'Shaky', 'Poor'])} pass from ${d.player}`;
+			return `${touchGrade(Number(d.mod))} pass from ${d.player}`;
 		case 'set':
-			return `${quality(Number(d.mod), ['Perfect', 'Solid', 'Tight', 'Wild'])} set from ${d.player}`;
+			return `${setGrade(Number(d.mod))} set from ${d.player}${d.source === 'touch' ? ' off the block' : ''}`;
 		case 'calls':
 			return `${d.hitter} is going ${SHOT_PHRASE[d.shot as Shot]} · ${d.blocker} takes away the ${d.block} · ${d.defender} ${d.stance === 'deep' ? 'stays deep' : 'creeps in for the tip'}`;
 		case 'swing':
@@ -53,12 +53,16 @@ export function narrate(e: LogEntry): string {
 			return d.shot === 'tip' ? `${d.player} tips it over the block` : `${d.player} swings ${SHOT_PHRASE[d.shot as Shot]}`;
 		case 'accuracy':
 			if (d.result === 'exact') return 'Right where they wanted it';
-			return d.result === 'drift' ? 'Slightly off target' : 'Mis-hit, an easy ball over';
+			if (d.result === 'block') return 'Straight into the block';
+			return d.result === 'drift' ? 'Slightly off target' : 'Easy ball over';
 		case 'block':
-			if (d.result === 'stuff') return `${d.player} stuffs it!`;
-			return d.result === 'touch' ? `${d.player} gets a touch on it` : `It beats ${d.player}'s block`;
+			if (d.result === 'stuff') return `Block by ${d.player}!`;
+			return d.result === 'touch' ? `Block touch by ${d.player}` : `It beats ${d.player}'s block`;
 		case 'dig':
-			if (d.up) return d.shot === 'tip' && d.stance === 'short' ? `${d.player} dives and saves the tip` : `${d.player} digs it up`;
+			if (d.up) {
+				const dig = `${touchGrade(firstTouch(Number(d.die)))} dig from ${d.player}`;
+				return d.shot === 'tip' && d.stance === 'short' ? `${dig}, diving for the tip` : dig;
+			}
 			return d.read ? `${d.player} gets a hand to it but can't control it` : `${d.player} can't get there`;
 		case 'point':
 			return `Point Team ${d.winner} · ${POINT_REASON[d.kind as string] ?? d.kind} · ${d.scoreA}–${d.scoreB}${d.gameOver ? ` · Team ${d.winner} wins the game` : ''}`;
@@ -101,38 +105,36 @@ export function callout(g: Game): Callout | null {
 		return make(`Team ${point.winner} wins!`, `${won}–${lost}`, point.winner, true);
 	}
 
+	// One plain word per outcome: Kill, Block, Block touch, Dig, Easy ball over or Error.
+	// Big moments shake the court (epic) rather than getting a different word.
 	if (point) {
 		switch (point.kind) {
 			case 'guaranteed kill':
-				return make('Unstoppable!', `Perfect set, and ${swing?.player} hammers it home`, point.winner, true);
+				return make('Kill!', 'Perfect set, perfect hit', point.winner, true);
 			case 'shank':
 				return swing
-					? make('Hitting error!', `${swing.player} ${swing.shot === 'tip' ? 'tips' : 'hits'} it into the net`, point.winner)
-					: make('Set error!', `${set?.player} can't keep it in play`, point.winner);
-			case 'stuff': {
-				const margin = Number(block?.total) - Number(block?.attack);
-				return make(margin >= 6 ? 'Roofed!' : 'Stuff block!', `${block?.player} shuts down ${hit?.player}`, point.winner, true);
-			}
+					? make('Error!', `${swing.player} ${swing.shot === 'tip' ? 'tips' : 'hits'} it into the net`, point.winner)
+					: make('Error!', `${set?.player} can't keep it in play`, point.winner);
+			case 'stuff':
+				return make('Block!', `${block?.player} blocks ${hit?.player}`, point.winner, true);
 			case 'kill': {
 				if (hit?.shot === 'tip') {
-					const sub = dig?.read ? `${dig.player} dives but can't reach it` : `${hit.player} drops it in short`;
-					return make('Tip kill!', sub, point.winner);
+					return make('Kill!', dig?.read ? `${dig.player} can't reach the tip` : `${hit.player} tips it in`, point.winner);
 				}
 				const margin = Number(dig?.attack) - Number(dig?.total);
-				const sub = dig?.read ? `Too hot for ${dig.player}` : `${dig?.player} caught out of position`;
-				return make(margin >= 8 ? 'Crushed!' : 'Kill!', sub, point.winner, margin >= 8);
+				const sub = dig?.read ? `Too hot for ${dig.player}` : `${dig?.player} out of position`;
+				return make('Kill!', sub, point.winner, margin >= 8);
 			}
 		}
 	}
 
 	if (dig?.up) {
-		if (dig.shot === 'tip' && dig.stance === 'short') return make('Dive save!', `${dig.player} gets to the tip`, dig.team, true);
-		if (!dig.read) return make('Scramble!', `${dig.player} somehow keeps it alive`, dig.team, true);
-		if (Number(dig.attack) >= 14) return make('Huge dig!', `${dig.player} digs a monster swing`, dig.team, true);
-		return make('Dig!', `${dig.player} reads it`, dig.team);
+		if (dig.shot === 'tip' && dig.stance === 'short') return make('Dig!', `${dig.player} dives for the tip`, dig.team, true);
+		if (!dig.read) return make('Dig!', `${dig.player} keeps it alive`, dig.team, true);
+		return make('Dig!', `${dig.player} reads it`, dig.team, Number(dig.attack) >= 14);
 	}
-	if (block?.result === 'touch') return make('Touched!', `${block.player} gets fingers to it`, block.team);
-	if (acc?.result === 'easy' && hit) return make('Mis-hit!', `Easy ball over to Team ${other(hit.team as TeamId)}`, other(hit.team as TeamId));
+	if (block?.result === 'touch') return make('Block touch', `${block.player} gets fingers to it`, block.team);
+	if (acc?.result === 'easy' && hit) return make('Easy ball over', `Free ball to Team ${other(hit.team as TeamId)}`, other(hit.team as TeamId));
 	return null;
 }
 
@@ -143,6 +145,11 @@ export const needsShot = (g: Game, controlled: TeamId | null) =>
 /** It's the attack call, and the player's team is the one defending. */
 export const needsDefence = (g: Game, controlled: TeamId | null) =>
 	g.phase.kind === 'calls' && controlled !== null && g.attack !== null && g.attack.team !== controlled;
+
+/** The steps that play on their own: the serve, the pass and the set (also after a dig or block touch). */
+const AUTO: Phase['kind'][] = ['serve', 'freeBall', 'set', 'dug', 'touched'];
+/** Play only waits for the player at the call (then Space rolls the attack) and at the end of a point. */
+export const playsItself = (g: Game) => AUTO.includes(g.phase.kind);
 
 /** What the next Step will do, in volleyball terms, for the Step button. */
 export function nextAction(g: Game, controlled: TeamId | null = null): string {
@@ -155,9 +162,10 @@ export function nextAction(g: Game, controlled: TeamId | null = null): string {
 			return 'Pass';
 		case 'set':
 		case 'dug':
+		case 'touched':
 			return 'Set';
 		case 'calls':
-			return 'Call the play';
+			return 'Attack!';
 		case 'hit':
 			return 'Attack!';
 		case 'pointOver':
@@ -165,6 +173,15 @@ export function nextAction(g: Game, controlled: TeamId | null = null): string {
 		case 'gameOver':
 			return 'Game over';
 	}
+}
+
+/** One line under the court: whose call it is, or what just happened. */
+export function statusLine(g: Game, controlled: TeamId | null): string {
+	const a = g.attack;
+	if (a && needsShot(g, controlled)) return `Your attack · ${g.teams[a.team][a.hitter].name} is hitting`;
+	if (a && needsDefence(g, controlled)) return `Your defence · ${g.teams[a.team][a.hitter].name} is about to attack`;
+	const last = g.log[g.log.length - 1];
+	return last ? narrate(last) : '';
 }
 
 export type Move = 'spike' | 'tip' | 'block' | 'dig' | 'dive';
@@ -188,7 +205,7 @@ export function playerActions(g: Game): Record<string, Action> {
 		actions[`${hit.team}-${hit.slot as Slot}`] = { move: tipped ? 'tip' : 'spike', label: tipped ? 'tip!' : 'spike!' };
 	}
 	if (block) {
-		const label = block.result === 'stuff' ? 'stuff!' : block.result === 'touch' ? 'touch!' : 'beaten';
+		const label = block.result === 'stuff' ? 'block!' : block.result === 'touch' ? 'block touch' : 'beaten';
 		actions[`${block.team}-blocker`] = { move: 'block', label };
 	}
 	if (dig) {
@@ -221,12 +238,12 @@ export function duels(g: Game): Duel[] {
 	const list: Duel[] = [];
 	const block = find(entries, 'block');
 	if (block) {
-		const verdict = block.result === 'stuff' ? 'Stuffed' : block.result === 'touch' ? 'Touched' : 'Through';
+		const verdict = block.result === 'stuff' ? 'Block' : block.result === 'touch' ? 'Block touch' : 'Through';
 		list.push({ ...base, attack: Number(block.attack), defender: `${block.player} block`, defence: Number(block.total), verdict, attackWins: block.result === 'clean' });
 	}
 	const dig = find(entries, 'dig');
 	if (dig) {
-		const verdict = dig.up ? (dig.shot === 'tip' ? 'Saved' : 'Dug up') : 'Kill';
+		const verdict = dig.up ? 'Dig' : 'Kill';
 		list.push({ ...base, attack: Number(dig.attack), defender: `${dig.player} dig`, defence: Number(dig.total), verdict, attackWins: !dig.up });
 	}
 	return list;

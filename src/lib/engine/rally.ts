@@ -93,7 +93,8 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			team: a.team,
 			player: setter.name,
 			die,
-			mod: a.setMod
+			mod: a.setMod,
+			source: a.source
 		});
 		if (rules.isShank(a.firstDie, die)) return scorePoint(g, other(a.team), 'shank', 'two natural 1s');
 		g.phase = { kind: 'calls' };
@@ -121,7 +122,7 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 		case 'freeBall': {
 			const slot = config.freeBallReceiver;
 			const die = roll(phase.team, slot, 'pass');
-			g.attack = { team: phase.team, hitter: slot, source: 'free', firstDie: die, firstMod: rules.ladder(die) };
+			g.attack = { team: phase.team, hitter: slot, source: 'free', firstDie: die, firstMod: rules.firstTouch(die) };
 			const passer = g.teams[phase.team][slot].name;
 			log(`${passer} passes · d6 ${die} → ${signed(g.attack.firstMod)}`, 'pass', {
 				team: phase.team,
@@ -143,7 +144,23 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				source: 'dig',
 				dugAt: rules.defenderZone(dug.calls!.stance, dug.calls!.block),
 				firstDie: die,
-				firstMod: rules.ladder(die)
+				firstMod: rules.firstTouch(die)
+			};
+			return set();
+		}
+
+		case 'touched': {
+			// Beach: the block touch counts as the first contact, so there's no pass. The defender sets it
+			// straight away and the blocker attacks, with a penalty in place of the pass bonus. The block
+			// die counts as the first touch's die for the two-1s shank rule.
+			const blocked = g.attack!;
+			const die = blocked.blockDie!;
+			g.attack = {
+				team: other(blocked.team),
+				hitter: 'blocker',
+				source: 'touch',
+				firstDie: die,
+				firstMod: config.touchFirstMod
 			};
 			return set();
 		}
@@ -207,7 +224,7 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				a.incoming = power;
 				log(`${hitter.name} tips · ${powerText}`, 'hit', hitData());
 			} else {
-				a.incoming = rules.teamAttack(power, setter.attack, roll(a.team, partner(a.hitter), 'pool'));
+				a.incoming = rules.teamAttack(power, setter.attack, a.setDie!);
 				log(`${hitter.name} hits ${calls.shot} · ${powerText}, team ${a.incoming}`, 'hit', hitData());
 			}
 
@@ -216,14 +233,15 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const accText = `Accuracy ${accDie}${plus(a.firstMod)}${plus(setMod)} + ${setter.attack} = ${a.accuracy}`;
 			const defenderAt = rules.defenderZone(calls.stance, calls.block);
 			const where = rules.landing(calls.shot, a.accuracy, defenderAt, (zones) => pick(rng, zones));
+			a.aim = rules.aimResult(calls.shot, a.accuracy);
 			if (where === 'easy') {
 				log(`${accText} → easy ball`, 'accuracy', { result: 'easy', target: rules.TARGET[calls.shot] });
 				return freeBallTo(g, other(a.team));
 			}
 			a.landing = where;
-			const onTarget = where === rules.TARGET[calls.shot];
-			log(`${accText} → ${onTarget ? 'on target' : 'drifts'}, zone ${where}`, 'accuracy', {
-				result: onTarget ? 'exact' : 'drift',
+			const AIM_TEXT = { exact: 'on target', drift: 'drifts', block: 'into the block' } as const;
+			log(`${accText} → ${AIM_TEXT[a.aim as keyof typeof AIM_TEXT]}, zone ${where}`, 'accuracy', {
+				result: a.aim,
 				zone: where,
 				target: rules.TARGET[calls.shot]
 			});
@@ -231,17 +249,23 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			// The blocker and defender roll in the same step as the attackers.
 			const defending = other(a.team);
 			const { blocker, defender } = g.teams[defending];
-			if (calls.shot !== 'tip' && calls.shot === calls.block) {
+			// The block is in play when the shot went down the blocker's channel, or was aimed into the block.
+			const intoBlock = a.aim === 'block' && calls.shot !== calls.block;
+			if (calls.shot !== 'tip' && (calls.shot === calls.block || intoBlock)) {
 				const die = roll(defending, 'blocker', 'block');
 				const total = blocker.defense + die + config.blockBonus;
 				const result = rules.blockResult(total, a.incoming!);
 				log(
 					`${blocker.name} blocks · ${blocker.defense} + ${die} + ${config.blockBonus} = ${total} vs ${a.incoming} → ${result}`,
 					'block',
-					{ result, total, attack: a.incoming!, player: blocker.name, team: defending }
+					{ result, total, attack: a.incoming!, player: blocker.name, team: defending, intoBlock }
 				);
 				if (result === 'stuff') return scorePoint(g, defending, 'stuff', `block ${total} vs ${a.incoming}`);
-				if (result === 'touch') return freeBallTo(g, defending);
+				if (result === 'touch') {
+					a.blockDie = die;
+					g.phase = { kind: 'touched' };
+					return;
+				}
 			}
 
 			const reach = rules.reach(rules.distance(defenderAt, where));
@@ -251,13 +275,14 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			if (config.partnerPoolOnDig) dig += Math.floor((blocker.defense + roll(defending, 'blocker', 'pool')) / 2);
 			const up = dig >= a.incoming!;
 			log(
-				`${defender.name} digs · ${defender.defense} × ${reach} + ${digDie}${read ? ` + ${config.readBonus} read` : ''} = ${dig} vs ${a.incoming} → ${up ? `up, first touch ${signed(rules.ladder(digDie))}` : 'kill'}`,
+				`${defender.name} digs · ${defender.defense} × ${reach} + ${digDie}${read ? ` + ${config.readBonus} read` : ''} = ${dig} vs ${a.incoming} → ${up ? `up, first touch ${signed(rules.firstTouch(digDie))}` : 'kill'}`,
 				'dig',
 				{
 					shot: calls.shot,
 					read,
 					up,
 					total: dig,
+					die: digDie,
 					attack: a.incoming!,
 					reach,
 					stance: calls.stance,

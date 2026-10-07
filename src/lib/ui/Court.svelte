@@ -10,11 +10,15 @@
 		arcPoint,
 		ballAt,
 		calloutTop,
+		coverage,
 		FLIGHT,
 		flightKind,
+		halfBox,
+		type FlightKind,
 		positions,
 		previewDefence,
 		roleOf,
+		shotPoint,
 		VIEW,
 		zoneBox,
 		zoneCenter,
@@ -31,17 +35,28 @@
 		dice,
 		staged = null,
 		preview = null,
-		defencePreview = null
+		defencePreview = null,
+		onshot = null,
+		onpreview = () => {}
 	}: {
 		game: Game;
-		dice: { key: number; items: PlacedDie[] };
+		/** Each die carries the step it was rolled in: earlier ones in the possession stay, faded. */
+		dice: { key: number; items: (PlacedDie & { step: number })[] };
 		/** Where to draw players and the ball instead, while someone runs to their spot to roll. */
 		staged?: { pos: Positions; ball: Point } | null;
 		/** A shot the player is hovering before choosing it: drawn as the intended arrow. */
 		preview?: Shot | null;
 		/** A defence the player is setting up before locking it in: drawn on the court. */
 		defencePreview?: { block: Channel; stance: Stance } | null;
+		/** Set while it's the player's attack: the target zones become buttons for the three shots. */
+		onshot?: ((shot: Shot) => void) | null;
+		/** Hovering or focusing a target zone previews that shot; null when it stops. */
+		onpreview?: (shot: Shot | null) => void;
 	} = $props();
+
+	const SHOTS: Shot[] = ['line', 'cross', 'tip'];
+	/** A read shot is one the defender is standing in position for. */
+	const COVER_WORD = { blocked: 'blocked', read: 'covered', open: 'open' } as const;
 
 	const TEAMS: TeamId[] = ['A', 'B'];
 	const pos = $derived(
@@ -55,17 +70,49 @@
 	const calledShot = $derived(a?.calls?.shot ?? preview);
 	const target = $derived(calledShot && a ? TARGET[calledShot] : null);
 	const ballTarget = $derived(staged?.ball ?? ballAt(game, pos));
+	/** What the defence covers, once it's called or while the player sets theirs up. */
+	const covers = $derived.by(() => {
+		const d = a?.calls ?? defencePreview;
+		return d ? coverage(d.block, d.stance) : null;
+	});
+	/** Where a shot's tag sits: across the top of its target zone, above the player's action label. */
+	const tagAt = (team: TeamId, shot: Shot) => {
+		const b = zoneBox(team, TARGET[shot]);
+		return { x: b.x + b.w / 2, y: b.y + 14 };
+	};
+
+	/** A stuffed or touched ball never reaches the back court, so don't draw it landing there. */
+	const stopped = $derived(
+		game.phase.kind === 'touched' || stepEntries(game).some((e) => e.tag === 'point' && e.data?.kind === 'stuff')
+	);
 
 	// The ball flies along an arc to each new spot, sitting at the corner of the chip that holds it.
+	// A line shot that lands in the sideline column sits on the line instead.
 	const BALL_OFFSET = { x: 34, y: -20 };
-	const ballSpot = $derived({ x: ballTarget.x + BALL_OFFSET.x, y: ballTarget.y + BALL_OFFSET.y });
+	const ballSpot = $derived.by(() => {
+		const landed = a?.calls && a.landing && !stopped && !staged ? zoneCenter(other(a.team), a.landing) : null;
+		const onLine = landed && a?.calls ? shotPoint(other(a.team), a.landing!, a.calls.shot) : null;
+		if (landed && onLine && onLine.x !== landed.x && ballTarget.x === landed.x && ballTarget.y === landed.y) {
+			return { x: onLine.x, y: onLine.y + BALL_OFFSET.y };
+		}
+		return { x: ballTarget.x + BALL_OFFSET.x, y: ballTarget.y + BALL_OFFSET.y };
+	});
 	let flight = $state.raw(untrack(() => ({ from: ballSpot, to: ballSpot, apex: 0 })));
+	/** The possession's earlier flights (serve, pass, set), kept as dotted lines for reference. */
+	let earlier = $state.raw<string[]>([]);
+	let lastKind: FlightKind = 'lob';
 	const progress = new Tween(1);
 	$effect(() => {
 		const to = ballSpot;
-		const { apex, ms } = FLIGHT[flightKind(game, staged !== null)];
+		const kind = flightKind(game, staged !== null);
+		const { apex, ms } = FLIGHT[kind];
 		untrack(() => {
 			if (to.x === flight.to.x && to.y === flight.to.y) return;
+			// A serve or an attack starts a new picture; a pass or set adds to the build-up.
+			const attack = (k: FlightKind) => k === 'spike' || k === 'tip';
+			const before = pathOf(flight);
+			earlier = kind === 'serve' || attack(kind) || attack(lastKind) || !before ? [] : [...earlier, before];
+			lastKind = kind;
 			// Start from wherever the ball's shadow is now, even if it was still in the air.
 			const from = arcPoint(flight.from, flight.to, flight.apex, progress.current).ground;
 			flight = { from, to, apex };
@@ -75,20 +122,23 @@
 		});
 	});
 	const ball = $derived(arcPoint(flight.from, flight.to, flight.apex, progress.current));
-	/** The flight path, drawn as a faint trail: a quadratic curve that peaks at the apex. */
-	const trail = $derived.by(() => {
-		const { from, to, apex } = flight;
+	/** A flight's path, drawn as a faint trail: a quadratic curve that peaks at the apex. */
+	function pathOf({ from, to, apex }: { from: Point; to: Point; apex: number }) {
 		if (from.x === to.x && from.y === to.y) return null;
 		const cx = (from.x + to.x) / 2;
 		const cy = (from.y + to.y) / 2 - 2 * apex;
 		return `M ${from.x} ${from.y} Q ${cx} ${cy} ${to.x} ${to.y}`;
-	});
+	}
+	const trail = $derived(pathOf(flight));
 	const moment = $derived(callout(game));
 	const actions = $derived(playerActions(game));
 	/** A point was won this step: mark where the ball hit the floor. */
 	const scored = $derived(stepEntries(game).some((e) => e.tag === 'point'));
-	/** A stuffed ball never reaches the back court, so don't draw it landing there. */
-	const stuffed = $derived(stepEntries(game).some((e) => e.tag === 'point' && e.data?.kind === 'stuff'));
+	/**
+	 * The ball came down on the losing side (a kill on the defenders, a block or error on the hitters),
+	 * so that half gets a glowing orange trace, drawn clockwise.
+	 */
+	const pointTo = $derived(stepEntries(game).find((e) => e.tag === 'point')?.data?.winner as TeamId | undefined);
 	/** Once the step's result is on screen, the dice fade so the play stands out. */
 	const resolved = $derived(dice.key === game.steps);
 
@@ -102,13 +152,16 @@
 	});
 
 	// Intended shot: dashed, from the hitter to the called zone. Actual shot: solid, to where it landed.
+	// A line shot runs straight down the sideline, so both arrows start on that line too.
 	const shot = $derived.by(() => {
 		if (!a || !calledShot) return null;
-		const from = zoneCenter(a.team, pos[a.team][a.hitter]);
+		const d = other(a.team);
+		const intended = shotPoint(d, TARGET[calledShot], calledShot);
+		const hitter = zoneCenter(a.team, pos[a.team][a.hitter]);
 		return {
-			from,
-			intended: zoneCenter(other(a.team), TARGET[calledShot]),
-			actual: a.landing && !stuffed ? zoneCenter(other(a.team), a.landing) : null
+			from: calledShot === 'line' ? { x: intended.x, y: hitter.y } : hitter,
+			intended,
+			actual: a.landing && !stopped ? shotPoint(d, a.landing, calledShot) : null
 		};
 	});
 
@@ -144,7 +197,7 @@
 				{@const b = zoneBox(team, zone)}
 				<rect
 					class="zone"
-					class:landing={team === defending && zone === a?.landing && !stuffed}
+					class:landing={team === defending && zone === a?.landing && !stopped}
 					x={b.x}
 					y={b.y}
 					width={b.w}
@@ -154,9 +207,34 @@
 			{/each}
 		{/each}
 
+		{#if defending && covers}
+			{#each SHOTS as s (s)}
+				{@const b = zoneBox(defending, TARGET[s])}
+				{@const tag = tagAt(defending, s)}
+				<rect class="cover {covers[s]}" x={b.x + 1} y={b.y + 1} width={b.w - 2} height={b.h - 2} />
+				<text class="cover-tag {covers[s]}" x={tag.x} y={tag.y}>
+					<tspan class="shot-name">{s}</tspan>
+					<tspan x={tag.x} dy="13">{COVER_WORD[covers[s]]}</tspan>
+				</text>
+			{/each}
+		{:else if defending && onshot}
+			{#each SHOTS as s (s)}
+				{@const tag = tagAt(defending, s)}
+				<text class="cover-tag pick" x={tag.x} y={tag.y}>{s}</text>
+			{/each}
+		{/if}
+
 		{#if defending && target}
 			{@const t = zoneBox(defending, target)}
 			<rect class="target" x={t.x + 3} y={t.y + 3} width={t.w - 6} height={t.h - 6} rx="4" />
+		{/if}
+
+		{#if pointTo}
+			{@const h = halfBox(other(pointTo))}
+			{#key game.steps}
+				<rect class="point-tint" x={h.x} y={h.y} width={h.w} height={h.h} />
+				<rect class="point-trace" x={h.x + 1} y={h.y + 1} width={h.w - 2} height={h.h - 2} rx="3" pathLength="100" />
+			{/key}
 		{/if}
 
 		<rect class="net" x="8" y={VIEW.netY - 4} width={VIEW.width - 16} height="8" />
@@ -187,11 +265,12 @@
 			{/if}
 		{/if}
 
-		<g class="dice" class:resolved>
-			{#each dice.items as d, i (`${dice.key}-${i}`)}
+		<!-- This step's dice stand out while they roll; earlier dice from the possession stay faded. -->
+		{#each dice.items as d, i (`${d.step}-${i}`)}
+			<g class="die" class:faded={d.step !== dice.key || resolved}>
 				<Die value={d.die} label={d.label} x={d.x} y={d.y} />
-			{/each}
-		</g>
+			</g>
+		{/each}
 
 		{#each TEAMS as team (team)}
 			{#each ['blocker', 'defender'] as const as slot (slot)}
@@ -212,10 +291,13 @@
 
 		{#if scored}
 			{#key game.steps}
-				<circle class="impact" cx={ballTarget.x + 34} cy={ballTarget.y - 20} r="10" />
+				<circle class="impact" cx={ballSpot.x} cy={ballSpot.y} r="10" />
 			{/key}
 		{/if}
 
+		{#each earlier as path, i (i)}
+			<path class="trail earlier" d={path} />
+		{/each}
 		{#if trail}
 			{#key flight}
 				<path class="trail" d={trail} />
@@ -229,13 +311,41 @@
 			ry={2.5 - ball.height / 80}
 			opacity={0.45 - ball.height / 250}
 		/>
-		<circle class="ball" cx={ball.x} cy={ball.y} r={7 + ball.height / 18} />
+		<!-- A yellow-and-blue beach ball, drawn at radius 7, shown at 9 and scaled up as it rises. -->
+		<g class="ball" transform="translate({ball.x} {ball.y}) scale({1.3 + ball.height / 126})">
+			<circle r="7" />
+			<path d="M-6.2 -3.2 Q0 -1 6.2 -3.2 M-4.5 5.3 Q-1 0 0 -7 M4.5 5.3 Q1 0 0 -7" />
+		</g>
+
+		{#if defending && onshot}
+			{#each SHOTS as s (s)}
+				{@const b = zoneBox(defending, TARGET[s])}
+				<rect
+					class="pick-zone"
+					role="button"
+					tabindex="0"
+					aria-label="Hit {s}"
+					x={b.x}
+					y={b.y}
+					width={b.w}
+					height={b.h}
+					onclick={() => onshot(s)}
+					onkeydown={(e) => {
+						if (e.key !== 'Enter' && e.key !== ' ') return;
+						e.preventDefault();
+						e.stopPropagation();
+						onshot(s);
+					}}
+					onmouseenter={() => onpreview(s)}
+					onmouseleave={() => onpreview(null)}
+					onfocus={() => onpreview(s)}
+					onblur={() => onpreview(null)}
+				/>
+			{/each}
+		{/if}
 	</svg>
 	<CalloutView callout={moment} top={moment ? calloutTop(moment.team, pos) : 50} />
 	</div>
-	<figcaption>
-		<span class="a">Team A</span> bottom · <span class="b">Team B</span> top · dashed = called shot · solid = where it went
-	</figcaption>
 </figure>
 
 <style>
@@ -247,7 +357,7 @@
 		/* Size the stage to the court so callouts scale with it. Tall enough to fill a laptop
 		   screen below the header without scrolling: height = width × 560 / 300. */
 		container-type: inline-size;
-		max-width: max(260px, calc((100vh - 330px) * 300 / 560));
+		max-width: max(260px, calc((100dvh - var(--chrome-h, 220px)) * 300 / 560));
 		margin: 0 auto;
 	}
 	.shaking {
@@ -268,6 +378,42 @@
 		}
 		80% {
 			transform: translate(-1px, 0);
+		}
+	}
+	/* A rect's outline starts at its top-left corner and runs clockwise, so drawing it in reads as a sweep. */
+	.point-trace {
+		fill: none;
+		stroke: var(--point);
+		stroke-width: 1.25;
+		stroke-linecap: round;
+		stroke-dasharray: 100;
+		stroke-dashoffset: 100;
+		filter: drop-shadow(0 0 2px var(--point)) drop-shadow(0 0 5px var(--point));
+		animation: trace 1100ms ease-in-out forwards;
+	}
+	.point-tint {
+		fill: var(--point);
+		opacity: 0;
+		animation: tint 1100ms ease-out forwards;
+	}
+	@keyframes trace {
+		to {
+			stroke-dashoffset: 0;
+		}
+	}
+	@keyframes tint {
+		to {
+			opacity: 0.06;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.point-trace {
+			animation: none;
+			stroke-dashoffset: 0;
+		}
+		.point-tint {
+			animation: none;
+			opacity: 0.06;
 		}
 	}
 	.impact {
@@ -326,10 +472,10 @@
 		fill: var(--block);
 		text-transform: uppercase;
 	}
-	.dice {
+	.die {
 		transition: opacity 400ms;
 	}
-	.dice.resolved {
+	.die.faded {
 		opacity: 0.35;
 	}
 	.block {
@@ -346,11 +492,15 @@
 	}
 	.trail {
 		fill: none;
-		stroke: var(--ball);
+		stroke: var(--actual);
 		stroke-width: 1.5;
 		stroke-dasharray: 2 4;
 		stroke-linecap: round;
 		animation: trail 1200ms ease-out forwards;
+	}
+	.trail.earlier {
+		animation: none;
+		opacity: 0.35;
 	}
 	@keyframes trail {
 		from {
@@ -363,20 +513,59 @@
 	.shadow {
 		fill: #000;
 	}
-	.ball {
+	.ball circle {
 		fill: var(--ball);
-		stroke: #854f0b;
-		stroke-width: 1;
+		stroke: var(--ball-edge);
+		stroke-width: 1.3;
 	}
-	figcaption {
-		font-size: 0.8rem;
-		color: var(--muted);
-		margin-top: 4px;
+	.ball path {
+		fill: none;
+		stroke: var(--ball-panel);
+		stroke-width: 1.4;
+		stroke-linecap: round;
 	}
-	.a {
-		color: var(--team-a);
+	.cover {
+		opacity: 0.6;
 	}
-	.b {
-		color: var(--team-b);
+	.cover.blocked,
+	.cover.read {
+		fill: var(--covered-bg);
+	}
+	.cover.open {
+		fill: var(--open-bg);
+	}
+	.cover-tag {
+		font-size: 11px;
+		font-weight: 800;
+		text-anchor: middle;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		pointer-events: none;
+	}
+	.cover-tag.blocked,
+	.cover-tag.read {
+		fill: var(--covered);
+	}
+	.cover-tag.open {
+		fill: var(--open);
+	}
+	.shot-name {
+		font-size: 9px;
+		font-weight: 600;
+	}
+	.cover-tag.pick {
+		fill: var(--muted);
+	}
+	.pick-zone {
+		fill: transparent;
+		cursor: pointer;
+		outline: none;
+	}
+	.pick-zone:hover,
+	.pick-zone:focus-visible {
+		fill: var(--actual);
+		fill-opacity: 0.12;
+		stroke: var(--actual);
+		stroke-width: 2;
 	}
 </style>

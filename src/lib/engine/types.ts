@@ -6,6 +6,8 @@ export type Stance = 'deep' | 'short';
 export type Zone = 1 | 2 | 3 | 4 | 5 | 6;
 export type BlockResult = 'stuff' | 'touch' | 'clean';
 export type PointKind = 'shank' | 'guaranteed kill' | 'stuff' | 'kill';
+/** How well an attack was aimed: on target, a zone off, straight into the block, or an easy ball over. */
+export type AimResult = 'exact' | 'drift' | 'block' | 'easy';
 export type RollLabel = 'pass' | 'set' | 'power' | 'pool' | 'aim' | 'block' | 'dig';
 
 export interface Player {
@@ -31,8 +33,8 @@ export interface Calls {
 export interface Attack {
 	team: TeamId;
 	hitter: Slot;
-	/** How this side got the ball: a pass of a serve or free ball, or a dig. */
-	source: 'free' | 'dig';
+	/** How this side got the ball: a pass of a serve or free ball, a dig, or a block touch. */
+	source: 'free' | 'dig' | 'touch';
 	/** Where the dig was played, when `source` is 'dig'. */
 	dugAt?: Zone;
 	firstDie: number;
@@ -44,7 +46,10 @@ export interface Attack {
 	incoming?: number;
 	accuracy?: number;
 	landing?: Zone;
+	aim?: AimResult;
 	digDie?: number;
+	/** The defending blocker's die, kept when they touch the ball: it's their side's first contact. */
+	blockDie?: number;
 }
 
 export type Phase =
@@ -56,6 +61,8 @@ export type Phase =
 	| { kind: 'hit' }
 	/** The ball was dug up; the next step turns the digger into the hitter and rolls the set. */
 	| { kind: 'dug' }
+	/** The blocker got a touch on the ball. In beach that's their side's first contact, so the next step is the set. */
+	| { kind: 'touched' }
 	| { kind: 'pointOver' }
 	| { kind: 'gameOver' };
 

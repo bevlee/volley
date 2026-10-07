@@ -38,8 +38,6 @@
 
 <style>
 	section {
-		max-height: 560px;
-		overflow-y: auto;
 		font-size: 0.9rem;
 	}
 	details {

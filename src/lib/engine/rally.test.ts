@@ -71,9 +71,9 @@ describe('rally', () => {
 	});
 
 	it('stuffs a hard shot into the block', () => {
-		// pass 4 → 0, set 4 → 0, power 4+2 = 6, team 6 + (4+2)/2 = 9,
-		// accuracy 4+0+0+4 = 8 → zone 1, block 4+6+3 = 13 vs 9 → stuff
-		const g = playRally(evenGame(), fixedChoosers(lineIntoBlock), scriptedDice([4, 4, 2, 2, 4, 6]));
+		// pass 4 → 0, set 4 → 0, power 4+2 = 6, team 6 + (setter 4 + set die 4)/2 = 10,
+		// accuracy 4+0+0+4 = 8 → zone 1, block 4+6+3 = 13 vs 10 → stuff
+		const g = playRally(evenGame(), fixedChoosers(lineIntoBlock), scriptedDice([4, 4, 2, 4, 6]));
 		expect(g.score).toEqual({ A: 0, B: 1 });
 		expect(lastPoint(g)?.data?.kind).toBe('stuff');
 	});
@@ -82,14 +82,14 @@ describe('rally', () => {
 		// cross past a line block, defender short in 3. power 4+5 = 9, team 9 + (4+4)/2 = 13,
 		// accuracy 5+4 = 9 → zone 5, dig from 3: 4 × ¼ = 1, + 6 = 7 vs 13 → kill
 		const calls: Calls = { shot: 'cross', block: 'line', stance: 'short' };
-		const g = playRally(evenGame(), fixedChoosers(calls), scriptedDice([4, 4, 5, 4, 5, 6]));
+		const g = playRally(evenGame(), fixedChoosers(calls), scriptedDice([4, 4, 5, 5, 6]));
 		expect(g.score).toEqual({ A: 1, B: 0 });
 		expect(lastPoint(g)?.data?.kind).toBe('kill');
 	});
 
 	it('digs a read tip in the same step as the hit', () => {
 		// tip power 4+3 = 7 (no partner die), accuracy 4+4 = 8 → zone 3,
-		// dig 4 × 1 + 3 + 1 read = 8 vs 7 → up
+		// dig 4 × 1 + 3 + 3 read = 10 vs 7 → up
 		const calls: Calls = { shot: 'tip', block: 'line', stance: 'short' };
 		const g = run(4, calls, [4, 4, 3, 4, 3]);
 		expect(g.phase.kind).toBe('dug');
@@ -97,25 +97,55 @@ describe('rally', () => {
 	});
 
 	it('after a dig, the digger becomes the hitter and their partner sets', () => {
-		// dig die 3 is the first touch: ladder(3) = −1; set 4 − 1 = 3 → −1
+		// dig die 3 is the first touch: firstTouch(3) = 0; set 4 + 0 = 4 → 0
 		const calls: Calls = { shot: 'tip', block: 'line', stance: 'short' };
 		const g = run(5, calls, [4, 4, 3, 4, 3, 4]);
 		expect(g.phase.kind).toBe('calls');
-		expect(g.attack).toMatchObject({ team: 'B', hitter: 'defender', firstDie: 3, firstMod: -1, setDie: 4, setMod: -1 });
+		expect(g.attack).toMatchObject({ team: 'B', hitter: 'defender', firstDie: 3, firstMod: 0, setDie: 4, setMod: 0 });
 		expect(g.rolls).toEqual([{ team: 'B', slot: 'blocker', die: 4, label: 'set' }]);
 	});
 
+	it('sends a badly aimed hard shot into the block, even when the blocker took the other channel', () => {
+		// cross past a line block. pass 4 → 0, set 3 → −1, power 4+4−1 = 7, team 7 + (4+3)/2 = 10,
+		// aim 1 + 0 − 1 + 4 = 4 → into the block, block 4+6+3 = 13 vs 10 → stuff
+		const calls: Calls = { shot: 'cross', block: 'line', stance: 'deep' };
+		const g = run(4, calls, [4, 3, 4, 1, 6]);
+		const entries = g.log.slice(g.logStart);
+		expect(entries.find((e) => e.tag === 'accuracy')?.data).toMatchObject({ result: 'block' });
+		expect(entries.find((e) => e.tag === 'block')?.data).toMatchObject({ result: 'stuff', intoBlock: true });
+		expect(g.attack?.aim).toBe('block');
+		expect(lastPoint(g)?.data?.kind).toBe('stuff');
+	});
+
 	it('turns a wild hit into a free ball for the other side', () => {
-		// pass 1 → −3, set 2 − 3 = −1 → −5, power 4+3−5 = 2, team 2 + 3 = 5,
-		// accuracy 2 − 3 − 5 + 4 = −2 → easy ball
-		const g = run(4, lineIntoBlock, [1, 2, 3, 3, 2]);
+		// pass 1 → −2, set 2 − 2 = 0 → −4, power 4+3−4 = 3, team 3 + (4+2)/2 = 6,
+		// accuracy 2 − 2 − 4 + 4 = 0 → easy ball
+		const g = run(4, lineIntoBlock, [1, 2, 3, 2]);
 		expect(g.phase).toEqual({ kind: 'freeBall', team: 'B' });
 	});
 
-	it('turns a block touch into a free ball for the blockers', () => {
-		// power 4+4 = 8, team 8 + 4 = 12, accuracy 8 → zone 1, block 4+5+3 = 12 vs 12 → touch
-		const g = run(4, lineIntoBlock, [4, 4, 4, 4, 4, 5]);
-		expect(g.phase).toEqual({ kind: 'freeBall', team: 'B' });
+	it('counts a block touch as the blockers’ first contact, not a free ball', () => {
+		// power 4+4 = 8, team 8 + (4+4)/2 = 12, accuracy 8 → zone 1, block 4+5+3 = 12 vs 12 → touch
+		const g = run(4, lineIntoBlock, [4, 4, 4, 4, 5]);
+		expect(g.phase).toEqual({ kind: 'touched' });
+		expect(g.attack).toMatchObject({ team: 'A', blockDie: 5 });
+	});
+
+	it('after a block touch, the defender sets straight away and the blocker attacks, with no pass bonus', () => {
+		// no pass, so the touch penalty stands in for it: set 4 − 1 = 3 → −1
+		const g = run(5, lineIntoBlock, [4, 4, 4, 4, 5, 4]);
+		expect(config.touchFirstMod).toBe(-1);
+		expect(g.phase.kind).toBe('calls');
+		expect(g.attack).toMatchObject({
+			team: 'B',
+			hitter: 'blocker',
+			source: 'touch',
+			firstDie: 5,
+			firstMod: -1,
+			setDie: 4,
+			setMod: -1
+		});
+		expect(g.rolls).toEqual([{ team: 'B', slot: 'defender', die: 4, label: 'set' }]);
 	});
 
 	it('has the team that won the point serve the next rally', () => {
@@ -176,12 +206,12 @@ describe('dice record', () => {
 	});
 
 	it('rolls the attackers, blocker and defender together in the hit step', () => {
-		// power 4+6 = 10, team 10 + (4+6)/2 = 15, accuracy 8 → zone 1,
-		// block 4+1+3 = 8 vs 15 → clean, dig from 5: 4 × ¼ = 1, + 6 = 7 vs 15 → kill
-		const g = run(4, lineIntoBlock, [4, 4, 6, 6, 4, 1, 6]);
+		// power 4+6 = 10, team 10 + (4+4)/2 = 14, accuracy 8 → zone 1,
+		// block 4+1+3 = 8 vs 14 → clean, dig from 5: 4 × ¼ = 1, + 6 = 7 vs 14 → kill.
+		// The setter's share uses their set die, so they roll nothing here.
+		const g = run(4, lineIntoBlock, [4, 4, 6, 4, 1, 6]);
 		expect(g.rolls).toEqual([
 			{ team: 'A', slot: 'blocker', die: 6, label: 'power' },
-			{ team: 'A', slot: 'defender', die: 6, label: 'pool' },
 			{ team: 'A', slot: 'blocker', die: 4, label: 'aim' },
 			{ team: 'B', slot: 'blocker', die: 1, label: 'block' },
 			{ team: 'B', slot: 'defender', die: 6, label: 'dig' }
@@ -190,19 +220,19 @@ describe('dice record', () => {
 	});
 
 	it('marks where the latest step’s log entries start, with details for the UI', () => {
-		// the stuff rally: power 6, team 9, block 13
-		const g = run(4, lineIntoBlock, [4, 4, 2, 2, 4, 6]);
+		// the stuff rally: power 6, team 10, block 13
+		const g = run(4, lineIntoBlock, [4, 4, 2, 4, 6]);
 		const entries = g.log.slice(g.logStart);
 		expect(entries.map((e) => e.tag)).toEqual(['hit', 'accuracy', 'block', 'point']);
-		expect(entries[0].data).toMatchObject({ team: 'A', player: 'A1', shot: 'line', attack: 9 });
+		expect(entries[0].data).toMatchObject({ team: 'A', player: 'A1', shot: 'line', attack: 10 });
 		expect(entries[1].data).toMatchObject({ result: 'exact', zone: 1 });
-		expect(entries[2].data).toMatchObject({ result: 'stuff', total: 13, attack: 9, player: 'B1' });
+		expect(entries[2].data).toMatchObject({ result: 'stuff', total: 13, attack: 10, player: 'B1' });
 		expect(entries[3].data).toMatchObject({ winner: 'B', kind: 'stuff', scoreA: 0, scoreB: 1, gameOver: false });
 	});
 
 	it('tags passes, sets and digs with who did it and how well', () => {
 		const calls: Calls = { shot: 'tip', block: 'line', stance: 'short' };
-		// pass 6 → +2, set 4 + 2 → +2, tip 4 + 3 + 2 = 9, aim 4 + 2 + 2 + 4 = 12 → zone 3, dig 4 + 5 + 1 = 10 → up
+		// pass 6 → +2, set 4 + 2 → +2, tip 4 + 3 + 2 = 9, aim 4 + 2 + 2 + 4 = 12 → zone 3, dig 4 + 5 + 3 = 12 → up
 		const g = run(4, calls, [6, 4, 3, 4, 5]);
 		const byTag = (tag: string) => g.log.find((e) => e.tag === tag)?.data;
 		expect(byTag('pass')).toMatchObject({ team: 'A', player: 'A1', mod: 2 });

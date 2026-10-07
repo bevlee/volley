@@ -1,5 +1,5 @@
 import { config } from './config';
-import type { BlockResult, Channel, Shot, Stance, TeamId, Zone } from './types';
+import type { AimResult, BlockResult, Channel, Shot, Stance, TeamId, Zone } from './types';
 
 export const ZONES: readonly Zone[] = [1, 2, 3, 4, 5, 6];
 
@@ -24,10 +24,15 @@ export function ladder(total: number): number {
 	return total - 4;
 }
 
+/** The first touch's bonus from the pass or dig roll alone: softer than the set's ladder, and neutral on average. */
+const FIRST_TOUCH = [-2, -1, 0, 0, 1, 2];
+export const firstTouch = (die: number) => FIRST_TOUCH[die - 1];
+
 export const power = (attack: number, die: number, setMod: number) => attack + die + setMod;
 
-export const teamAttack = (power: number, partnerAttack: number, partnerDie: number) =>
-	config.partnerPoolOnAttack ? power + Math.floor((partnerAttack + partnerDie) / 2) : power;
+/** The setter's share of a hard attack: half their attack stat plus their set die, so a good set hits harder. */
+export const teamAttack = (power: number, setterAttack: number, setDie: number) =>
+	config.partnerPoolOnAttack ? power + Math.floor((setterAttack + setDie) / 2) : power;
 
 export const accuracy = (die: number, firstMod: number, setMod: number, setterAttack: number) =>
 	die + firstMod + setMod + setterAttack;
@@ -46,16 +51,30 @@ export function defenderZone(stance: Stance, block: Channel): Zone {
 	return block === 'line' ? TARGET.cross : TARGET.line;
 }
 
-/** Where the ball lands. A miss drifts to the target's neighbour closest to the defender. */
+/**
+ * How well an attack was aimed. A hard shot aimed badly goes straight into the block, whichever
+ * channel the blocker took; a tip goes over the block, so it only drifts.
+ */
+export function aimResult(shot: Shot, acc: number): AimResult {
+	if (acc <= config.accuracyEasy) return 'easy';
+	if (acc >= config.accuracyExact) return 'exact';
+	return shot !== 'tip' && acc <= config.accuracyIntoBlock ? 'block' : 'drift';
+}
+
+/**
+ * Where the ball lands. A drifting shot goes to the target's neighbour closest to the defender. A
+ * shot into the block stays on its target, for if it gets through.
+ */
 export function landing(
 	shot: Shot,
 	acc: number,
 	defender: Zone,
 	pickTie: (zones: Zone[]) => Zone
 ): Zone | 'easy' {
-	if (acc <= config.accuracyEasy) return 'easy';
+	const result = aimResult(shot, acc);
+	if (result === 'easy') return 'easy';
 	const target = TARGET[shot];
-	if (acc >= config.accuracyExact) return target;
+	if (result !== 'drift') return target;
 	const options = adjacent(target);
 	const best = Math.min(...options.map((z) => distance(z, defender)));
 	const closest = options.filter((z) => distance(z, defender) === best);

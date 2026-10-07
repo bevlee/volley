@@ -3,7 +3,7 @@ import { fixedChoosers } from '../engine/choosers';
 import { newGame, playRally, step } from '../engine/rally';
 import type { Game } from '../engine/types';
 import { scriptedDice } from '../engine/rng';
-import { arcPoint, ballAt, calloutTop, flightKind, previewDefence, placeDice, positions, rollBall, rollPositions, roleOf, zoneBox, zoneCenter } from './layout';
+import { arcPoint, ballAt, calloutTop, coverage, flightKind, halfBox, shotPoint, previewDefence, placeDice, positions, rollBall, rollPositions, roleOf, zoneBox, zoneCenter } from './layout';
 
 describe('placeDice', () => {
 	it('lines up each player’s dice under their zone centre', () => {
@@ -97,7 +97,7 @@ describe('positions', () => {
 
 describe('positions after a free ball mid-rally', () => {
 	it('holds the attack’s picture until the pass', () => {
-		// A hit line into B1's block and it was touched: a free ball to B
+		// A mis-hit A's attack into an easy ball: a free ball to B
 		const g = newGame(1);
 		g.phase = { kind: 'freeBall', team: 'B' };
 		g.attack = {
@@ -194,8 +194,8 @@ describe('ballAt', () => {
 		const g = playRally(
 			newGame(1),
 			fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }),
-			// pass, set, power 1, pool 1, aim 6 (on target), block 6
-			scriptedDice([4, 4, 1, 1, 6, 6])
+			// pass, set, power 1, aim 6 (on target), block 6
+			scriptedDice([4, 4, 1, 6, 6])
 		);
 		expect(g.log.at(-1)?.data?.kind).toBe('stuff');
 		expect(ballAt(g, positions(g))).toEqual(zoneCenter('A', 3));
@@ -249,7 +249,7 @@ describe('ball flight', () => {
 		const stuffed = playRally(
 			newGame(1),
 			fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }),
-			scriptedDice([4, 4, 1, 1, 6, 6])
+			scriptedDice([4, 4, 1, 6, 6])
 		);
 		expect(flightKind(stuffed, false)).toBe('spike');
 		const tipped = playRally(
@@ -273,5 +273,72 @@ describe('previewDefence', () => {
 		expect(previewDefence(g, 'line', 'short').B).toEqual({ blocker: 2, defender: 3 });
 		// the attackers don't move
 		expect(previewDefence(g, 'line', 'short').A).toEqual(positions(g).A);
+	});
+});
+
+describe('coverage', () => {
+	it('blocks the matching hard shot, reads the other with a deep defender, and leaves the tip open', () => {
+		expect(coverage('line', 'deep')).toEqual({ line: 'blocked', cross: 'read', tip: 'open' });
+		expect(coverage('cross', 'deep')).toEqual({ line: 'read', cross: 'blocked', tip: 'open' });
+	});
+	it('reads the tip with a short defender, leaving the unblocked hard shot open', () => {
+		expect(coverage('line', 'short')).toEqual({ line: 'blocked', cross: 'open', tip: 'read' });
+		expect(coverage('cross', 'short')).toEqual({ line: 'open', cross: 'blocked', tip: 'read' });
+	});
+});
+
+describe('ballAt after a block touch', () => {
+	it('keeps the ball with the blocker at the net, not where the shot was aimed', () => {
+		const g = newGame(1);
+		g.phase = { kind: 'touched' };
+		g.attack = {
+			team: 'A',
+			hitter: 'blocker',
+			source: 'free',
+			firstDie: 4,
+			firstMod: 0,
+			calls: { shot: 'line', block: 'line', stance: 'deep' },
+			landing: 1,
+			blockDie: 5
+		};
+		expect(ballAt(g, positions(g))).toEqual(zoneCenter('B', 2));
+	});
+});
+
+describe('positions after a dig on the setting spot', () => {
+	const afterSet = (dugAt: 3 | 5) => {
+		const g = newGame(1);
+		g.phase = { kind: 'calls' };
+		g.attack = { team: 'B', hitter: 'defender', source: 'dig', dugAt, firstDie: 4, firstMod: 0, setDie: 4, setMod: 0 };
+		return positions(g).B;
+	};
+
+	it('leaves the setter where they set from, at the net, when their partner dug it in the middle', () => {
+		expect(afterSet(3)).toEqual({ blocker: 2, defender: 4 });
+	});
+
+	it('still brings the setter to the setting spot after a dig anywhere else', () => {
+		expect(afterSet(5)).toEqual({ blocker: 3, defender: 4 });
+	});
+});
+
+describe('shotPoint', () => {
+	it('runs a line shot down the sideline: the left one on B’s side, the right one on A’s', () => {
+		expect(shotPoint('B', 1, 'line')).toEqual({ x: 27, y: zoneCenter('B', 1).y });
+		expect(shotPoint('B', 2, 'line')).toEqual({ x: 27, y: zoneCenter('B', 2).y });
+		expect(shotPoint('A', 1, 'line')).toEqual({ x: 273, y: zoneCenter('A', 1).y });
+	});
+
+	it('aims at the middle of the zone for a line shot that drifted inside, a cross or a tip', () => {
+		expect(shotPoint('B', 6, 'line')).toEqual(zoneCenter('B', 6));
+		expect(shotPoint('B', 5, 'cross')).toEqual(zoneCenter('B', 5));
+		expect(shotPoint('B', 3, 'tip')).toEqual(zoneCenter('B', 3));
+	});
+});
+
+describe('halfBox', () => {
+	it('covers each team’s six zones: B at the top, A at the bottom', () => {
+		expect(halfBox('B')).toEqual({ x: 15, y: 15, w: 270, h: 260 });
+		expect(halfBox('A')).toEqual({ x: 15, y: 285, w: 270, h: 260 });
 	});
 });

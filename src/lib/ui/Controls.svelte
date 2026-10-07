@@ -1,43 +1,42 @@
 <script lang="ts">
-	import type { Channel, Shot, Stance, TeamId } from '#lib/engine/types.ts';
+	import type { Channel, Shot, Stance } from '#lib/engine/types.ts';
 
 	let {
-		seed = $bindable(),
-		controlled = $bindable(),
+		status,
 		choosing,
 		defending,
 		defence = $bindable(),
 		ondefend,
+		shot,
 		onshot,
+		onattack,
 		onpreview,
 		over,
 		next,
 		onstep,
-		onrally,
-		ongame,
-		onreset,
-		onnewseed
+		onnewgame
 	}: {
-		seed: number;
-		/** The team the player calls shots for, or null to watch. */
-		controlled: TeamId | null;
+		/** One line on whose call it is or what just happened. */
+		status: string;
 		/** It's the player's attack: show the shot buttons instead of Step. */
 		choosing: boolean;
-		/** It's the other team's attack: show the block and defender choices. */
+		/** It's the other team's attack: show the block and dig choices. */
 		defending: boolean;
 		defence: { block: Channel; stance: Stance };
 		ondefend: () => void;
+		/** The shot picked for the player's attack. */
+		shot: Shot;
+		/** Picks a shot; it doesn't hit it. */
 		onshot: (shot: Shot) => void;
+		/** Hits the picked shot: the calls are revealed, then the attack rolls. */
+		onattack: () => void;
 		/** Hovering or focusing a shot previews it on the court; null when it stops. */
 		onpreview: (shot: Shot | null) => void;
 		over: boolean;
 		/** What the next step does, e.g. "Attack!". */
 		next: string;
 		onstep: () => void;
-		onrally: () => void;
-		ongame: () => void;
-		onreset: () => void;
-		onnewseed: () => void;
+		onnewgame: () => void;
 	} = $props();
 
 	function run(e: MouseEvent, action: () => void) {
@@ -61,81 +60,107 @@
 </script>
 
 <!-- Buttons drop focus after a click, so Space keeps meaning "next step" rather than re-pressing them. -->
-<div class="controls">
-	{#if over}
-		<button class="primary" onclick={(e) => run(e, onnewseed)}>New game</button>
-	{:else if choosing}
-		<span class="prompt">Your shot:</span>
-		{#each SHOTS as s (s.shot)}
-			<button
-				class="primary shot"
-				onclick={(e) => run(e, () => onshot(s.shot))}
-				onmouseenter={() => onpreview(s.shot)}
-				onmouseleave={() => onpreview(null)}
-				onfocus={() => onpreview(s.shot)}
-				onblur={() => onpreview(null)}
-			>
-				{s.label} <kbd>{s.key}</kbd>
+<section class="dock">
+	<p class="status" aria-live="polite">{status}</p>
+	<div class="row">
+		{#if over}
+			<button class="primary" onclick={(e) => run(e, onnewgame)}>New game</button>
+		{:else if choosing}
+			<span class="group" role="group" aria-label="Shot">
+				{#each SHOTS as s (s.shot)}
+					<button
+						class:on={shot === s.shot}
+						aria-pressed={shot === s.shot}
+						onclick={(e) => run(e, () => onshot(s.shot))}
+						onmouseenter={() => onpreview(s.shot)}
+						onmouseleave={() => onpreview(null)}
+						onfocus={() => onpreview(s.shot)}
+						onblur={() => onpreview(null)}
+					>
+						{s.label} <kbd>{s.key}</kbd>
+					</button>
+				{/each}
+			</span>
+			<button class="primary" onclick={(e) => run(e, onattack)}>Attack! <kbd>Space</kbd></button>
+		{:else if defending}
+			<span class="group" role="group" aria-label="Block">
+				<span class="group-label">Block</span>
+				{#each BLOCKS as b (b.value)}
+					<button class:on={defence.block === b.value} aria-pressed={defence.block === b.value} onclick={(e) => run(e, () => (defence.block = b.value))}>
+						{b.label} <kbd>{b.key}</kbd>
+					</button>
+				{/each}
+			</span>
+			<span class="group" role="group" aria-label="Dig">
+				<span class="group-label">Dig</span>
+				{#each STANCES as d (d.value)}
+					<button class:on={defence.stance === d.value} aria-pressed={defence.stance === d.value} onclick={(e) => run(e, () => (defence.stance = d.value))}>
+						{d.label} <kbd>{d.key}</kbd>
+					</button>
+				{/each}
+			</span>
+			<button class="primary" onclick={(e) => run(e, ondefend)}>Lock in <kbd>Space</kbd></button>
+		{:else}
+			<button class="primary wide" onclick={(e) => run(e, onstep)} title="Space or → also steps">
+				{next} <kbd>Space</kbd>
 			</button>
-		{/each}
+		{/if}
+	</div>
+	{#if choosing}
+		<p class="hint">Pick a shot, then Space to hit it. A hard shot gets stuffed if they block it. A tip gets dug if their defender creeps short.</p>
 	{:else if defending}
-		<span class="prompt">Your defence:</span>
-		<span class="group" role="group" aria-label="Block">
-			<span class="group-label">Block</span>
-			{#each BLOCKS as b (b.value)}
-				<button class:on={defence.block === b.value} aria-pressed={defence.block === b.value} onclick={(e) => run(e, () => (defence.block = b.value))}>
-					{b.label} <kbd>{b.key}</kbd>
-				</button>
-			{/each}
-		</span>
-		<span class="group" role="group" aria-label="Defender">
-			<span class="group-label">Defender</span>
-			{#each STANCES as d (d.value)}
-				<button class:on={defence.stance === d.value} aria-pressed={defence.stance === d.value} onclick={(e) => run(e, () => (defence.stance = d.value))}>
-					{d.label} <kbd>{d.key}</kbd>
-				</button>
-			{/each}
-		</span>
-		<button class="primary" onclick={(e) => run(e, ondefend)}>Lock it in <kbd>Space</kbd></button>
-	{:else}
-		<button class="primary" onclick={(e) => run(e, onstep)} title="Space or → also steps">
-			{next} <kbd>Space</kbd>
-		</button>
-		<button onclick={(e) => run(e, onrally)}>Play rally</button>
-		<button onclick={(e) => run(e, ongame)}>Play game</button>
+		<p class="hint"><span class="bad">Red</span> is covered, <span class="ok">green</span> is open.</p>
 	{/if}
-	<details class="options">
-		<summary>Options</summary>
-		<div class="option-row">
-			<button onclick={(e) => run(e, onreset)}>Replay this game</button>
-			<button onclick={(e) => run(e, onnewseed)}>New seed</button>
-			<label>Seed <input type="number" bind:value={seed} onchange={onreset} /></label>
-			<label>
-				You play
-				<select bind:value={controlled}>
-					<option value="A">Team A</option>
-					<option value="B">Team B</option>
-					<option value={null}>Watch only</option>
-				</select>
-			</label>
-		</div>
-	</details>
-</div>
+</section>
 
 <style>
-	.controls {
+	.dock {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 6px;
+		padding: 8px 0 4px;
+		/* Tall enough for the defence choices and hint, so the court never changes size. */
+		min-height: 120px;
+		box-sizing: border-box;
+	}
+	p {
+		margin: 0;
+		text-align: center;
+	}
+	.status {
+		font-weight: 600;
+		min-height: 1.5em;
+	}
+	.row {
 		display: flex;
 		flex-wrap: wrap;
+		justify-content: center;
 		gap: 8px;
 		align-items: center;
-		margin-bottom: 0;
+	}
+	.hint {
+		font-size: 0.8rem;
+		color: var(--muted);
+		max-width: 34rem;
+	}
+	.ok {
+		color: var(--open);
+		font-weight: 700;
+	}
+	.bad {
+		color: var(--covered);
+		font-weight: 700;
 	}
 	.primary {
 		background: var(--text);
 		color: var(--bg);
 		border-color: var(--text);
 		font-weight: 700;
-		min-width: 9.5rem;
+		min-width: 5.5rem;
+	}
+	.primary.wide {
+		min-width: 12rem;
 	}
 	.group {
 		display: inline-flex;
@@ -152,12 +177,6 @@
 		color: var(--bg);
 		font-weight: 700;
 	}
-	.prompt {
-		font-weight: 700;
-	}
-	.primary.shot {
-		min-width: 5.5rem;
-	}
 	kbd {
 		font-size: 0.65rem;
 		opacity: 0.7;
@@ -165,25 +184,5 @@
 		border-radius: 3px;
 		padding: 0 3px;
 		margin-left: 4px;
-	}
-	.options summary {
-		cursor: pointer;
-		color: var(--muted);
-		font-size: 0.85rem;
-	}
-	.option-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		margin-top: 6px;
-	}
-	label {
-		display: flex;
-		gap: 6px;
-		align-items: center;
-		color: var(--muted);
-	}
-	input {
-		width: 7rem;
 	}
 </style>
