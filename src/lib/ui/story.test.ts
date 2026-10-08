@@ -3,7 +3,7 @@ import { fixedChoosers } from '../engine/choosers';
 import { newGame, step } from '../engine/rally';
 import { scriptedDice } from '../engine/rng';
 import type { Calls, Game } from '../engine/types';
-import { callout, duels, narrate, needsDefence, needsShot, nextAction, playerActions, playsItself, playSummary, statusLine, stepEntries } from './story';
+import { callout, commentary, duels, narrate, quietLine, needsDefence, needsShot, nextAction, playerActions, playsItself, playSummary, statusLine, stepEntries } from './story';
 
 function evenGame(): Game {
 	const g = newGame(1);
@@ -36,7 +36,7 @@ describe('callout', () => {
 
 	it('calls a stuff "Block!", however big', () => {
 		// block 13 vs attack 10
-		expect(callout(run(4, line, [4, 4, 2, 4, 6]))).toMatchObject({ text: 'Block!', sub: 'B1 blocks A1', team: 'B', epic: true });
+		expect(callout(run(4, line, [4, 4, 2, 4, 6]))).toMatchObject({ text: 'Block!', sub: 'B1 blocks A1', team: 'B', epic: true, impact: 'slam' });
 		// set 3 → −1, attack 4 + 1 − 1 + (4 + 3)/2 = 7: block 13 vs 7
 		expect(callout(run(4, line, [4, 3, 1, 5, 6]))?.text).toBe('Block!');
 	});
@@ -44,18 +44,20 @@ describe('callout', () => {
 	it('calls every kill "Kill!", shaking the court for a big one', () => {
 		// attack 13 vs dig 7 from a defender caught short
 		const kill = callout(run(4, crossPastBlock('short'), [4, 4, 5, 5, 6]));
-		expect(kill).toMatchObject({ text: 'Kill!', team: 'A', epic: false });
+		// every hard kill shakes the court; a big one smashes it
+		expect(kill).toMatchObject({ text: 'Kill!', team: 'A', epic: false, impact: 'shake' });
 		expect(kill?.sub).toMatch(/out of position/);
 		// attack 13 vs dig 2
-		expect(callout(run(4, crossPastBlock('short'), [4, 4, 5, 5, 1]))).toMatchObject({ text: 'Kill!', epic: true });
-		// a tip that falls in: tip 7 vs a deep defender's dig 3
-		expect(callout(run(4, tip('deep'), [4, 4, 3, 4, 2]))).toMatchObject({ text: 'Kill!', sub: 'A1 tips it in', team: 'A' });
+		expect(callout(run(4, crossPastBlock('short'), [4, 4, 5, 5, 1]))).toMatchObject({ text: 'Kill!', epic: true, impact: 'smash' });
+		// a tip that falls in: tip 7 vs a deep defender's dig 3, a softer kind of impact
+		expect(callout(run(4, tip('deep'), [4, 4, 3, 4, 2]))).toMatchObject({ text: 'Kill!', sub: 'A1 tips it in', team: 'A', impact: 'tip' });
 		// a perfect set and hit
-		expect(callout(run(4, line, [4, 6, 6]))).toMatchObject({ text: 'Kill!', sub: 'Perfect set, perfect hit', team: 'A', epic: true });
+		// the set die may not grade Perfect (a block touch takes 1 off it), so the callout names the dice
+		expect(callout(run(4, line, [4, 6, 6]))).toMatchObject({ text: 'Kill!', sub: 'Double six: set roll 6, power roll 6', team: 'A', epic: true, impact: 'smash' });
 	});
 
 	it('calls every dig "Dig!"', () => {
-		expect(callout(run(4, tip('short'), [6, 4, 3, 4, 5]))).toMatchObject({ text: 'Dig!', sub: 'B2 dives for the tip', team: 'B', epic: true });
+		expect(callout(run(4, tip('short'), [6, 4, 3, 4, 5]))).toMatchObject({ text: 'Dig!', sub: 'B2 dives for the tip', team: 'B', epic: true, impact: 'shake' });
 		// cross 10 into a deep defender on the spot: dig 4 + 6 + 3 = 13
 		expect(callout(run(4, crossPastBlock('deep'), [4, 4, 2, 4, 6]))).toMatchObject({ text: 'Dig!', sub: 'B2 reads it', team: 'B' });
 	});
@@ -130,6 +132,30 @@ describe('narrate a shot aimed into the block', () => {
 	});
 });
 
+describe('commentary', () => {
+	it('tells the rally so far, one line per moment', () => {
+		// pass 4, set 4, power 2, aim 4 → on target, block 13 vs 10 → stuff
+		expect(commentary(run(4, line, [4, 4, 2, 4, 6]))).toEqual([
+			'B2 serves to Team A',
+			'Good pass from A1',
+			'Good set from A2',
+			'A1 is going down the line · B1 takes away the line · B2 stays deep',
+			'A1 swings down the line',
+			'Right where they wanted it',
+			'Block by B1!',
+			'Point Team B · block · 0–1'
+		]);
+	});
+});
+
+describe('quietLine', () => {
+	it('says nothing about the touches, only the player’s call and how the point ended', () => {
+		expect(quietLine(run(1, line, [4]), null)).toBe('');
+		expect(quietLine(run(2, line, [4, 4]), 'A')).toBe('Your attack · A1 is hitting');
+		expect(quietLine(run(4, line, [4, 4, 2, 4, 6]), 'A')).toBe('Point Team B · block · 0–1');
+	});
+});
+
 describe('narrate a dig', () => {
 	it('grades it from the dig roll, like a pass', () => {
 		// cross into a deep defender on the spot, dig die 6 → Perfect
@@ -170,7 +196,8 @@ describe('nextAction', () => {
 		expect(nextAction(run(1, line, [4]))).toBe('Set');
 		// Space at the call reveals both sides' calls and rolls the attack in one go
 		expect(nextAction(run(2, line, [4, 4]))).toBe('Attack!');
-		expect(nextAction(run(3, line, [4, 4]))).toBe('Attack!');
+		// once the calls are in, the attack is already on its way: Space only skips its animation
+		expect(nextAction(run(3, line, [4, 4]))).toBe('Skip');
 		expect(nextAction(run(4, line, [4, 4, 2, 4, 6]))).toBe('Next rally');
 	});
 
@@ -208,11 +235,14 @@ describe('playsItself', () => {
 });
 
 describe('playerActions', () => {
-	it('has the hitter spike and the blocker jump', () => {
+	it('has the hitter spike and the blocker jump, with only the block named when it stuffs the spike', () => {
+		// block 13 vs 10 → stuff: "block!" is the moment, so the hitter's spike goes unlabelled
 		expect(playerActions(run(4, line, [4, 4, 2, 4, 6]))).toEqual({
-			'A-blocker': { move: 'spike', label: 'spike!' },
+			'A-blocker': { move: 'spike', label: '' },
 			'B-blocker': { move: 'block', label: 'block!' }
 		});
+		// block 4 + 5 + 3 = 12 vs 12 → touch: the spike still gets its label
+		expect(playerActions(run(4, line, [4, 4, 4, 4, 5]))['A-blocker']).toEqual({ move: 'spike', label: 'spike!' });
 	});
 
 	it('has a short defender dive for a tip', () => {
@@ -235,6 +265,15 @@ describe('playerActions', () => {
 			'B-blocker': { move: 'block', label: '' },
 			'B-defender': { move: 'dive', label: '' }
 		});
+	});
+
+	it('calls two 1s a shank, on the hitter or, on the pass and set, the setter', () => {
+		// pass 4, set 1, power 1: the hit goes into the net
+		expect(playerActions(run(4, line, [4, 1, 1]))).toEqual({ 'A-blocker': { move: 'spike', label: 'shank!' } });
+		// a tip shanked the same way still says shank
+		expect(playerActions(run(4, tip('short'), [4, 1, 1]))).toEqual({ 'A-blocker': { move: 'tip', label: 'shank!' } });
+		// pass 1, set 1: the setter (A2) can't keep it in play
+		expect(playerActions(run(2, line, [1, 1]))).toEqual({ 'A-defender': { move: 'dig', label: 'shank!' } });
 	});
 
 	it('has the hitter spike on an unstoppable swing', () => {
@@ -282,11 +321,11 @@ describe('playSummary', () => {
 });
 
 describe('errors on a tip', () => {
-	it('says the tip went into the net and labels it a tip', () => {
+	it('says the tip went into the net and labels it a shank', () => {
 		// pass 4, set 1, power die 1: a shank on the tip
 		const g = run(4, tip('short'), [4, 1, 1]);
 		expect(stepEntries(g).map(narrate)[0]).toBe('A1 tips it into the net');
-		expect(playerActions(g)).toEqual({ 'A-blocker': { move: 'tip', label: 'tip!' } });
+		expect(playerActions(g)).toEqual({ 'A-blocker': { move: 'tip', label: 'shank!' } });
 	});
 });
 

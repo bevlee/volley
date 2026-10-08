@@ -8,7 +8,7 @@
 		debugOpen,
 		onhelp,
 		ondebug
-	}: { game: Game; debugOpen: boolean; onhelp: () => void; ondebug: () => void } = $props();
+	}: { game: Game; debugOpen: boolean; onhelp: () => void; /** Null hides the debug button (it's only on /admin). */ ondebug: (() => void) | null } = $props();
 </script>
 
 <header class="bar">
@@ -31,11 +31,13 @@
 	</span>
 	<div class="icons">
 		<button class="icon" onclick={onhelp} aria-label="Rules" title="Rules (?)">?</button>
-		<button class="icon" class:on={debugOpen} onclick={ondebug} aria-label="Debug panel" aria-pressed={debugOpen} title="Debug panel (D)">
-			<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-				<path d="M5 7l5 5l-5 5M12 19h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-			</svg>
-		</button>
+		{#if ondebug}
+			<button class="icon" class:on={debugOpen} onclick={ondebug} aria-label="Debug panel" aria-pressed={debugOpen} title="Debug panel (D)">
+				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+					<path d="M5 7l5 5l-5 5M12 19h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+				</svg>
+			</button>
+		{/if}
 	</div>
 </header>
 

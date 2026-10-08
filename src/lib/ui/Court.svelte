@@ -9,6 +9,7 @@
 	import {
 		arcPoint,
 		ballAt,
+		blockHands,
 		calloutTop,
 		coverage,
 		FLIGHT,
@@ -27,7 +28,7 @@
 		type Positions
 	} from './layout';
 	import PlayerChip from './PlayerChip.svelte';
-	import { callout, playerActions, stepEntries } from './story';
+	import { callout, playerActions, stepEntries, type Impact } from './story';
 
 	/** `dice.key` changes every step, so a new roll re-animates even if the values repeat. */
 	let {
@@ -81,15 +82,20 @@
 		return { x: b.x + b.w / 2, y: b.y + 14 };
 	};
 
-	/** A stuffed or touched ball never reaches the back court, so don't draw it landing there. */
-	const stopped = $derived(
-		game.phase.kind === 'touched' || stepEntries(game).some((e) => e.tag === 'point' && e.data?.kind === 'stuff')
+	const stuffed = $derived(stepEntries(game).some((e) => e.tag === 'point' && e.data?.kind === 'stuff'));
+	/** Hit into the net (two 1s): like a stuffed ball, it drops at the net rather than being held. */
+	const netted = $derived(
+		stepEntries(game).some((e) => e.tag === 'swing') && stepEntries(game).some((e) => e.tag === 'point' && e.data?.kind === 'shank')
 	);
+	/** A stuffed or touched ball never reaches the back court, so don't draw it landing there. */
+	const stopped = $derived(game.phase.kind === 'touched' || stuffed);
 
 	// The ball flies along an arc to each new spot, sitting at the corner of the chip that holds it.
 	// A line shot that lands in the sideline column sits on the line instead.
 	const BALL_OFFSET = { x: 34, y: -20 };
 	const ballSpot = $derived.by(() => {
+		// A stuffed or netted ball is loose on the floor, not held by anyone.
+		if ((stuffed || netted) && !staged) return ballTarget;
 		const landed = a?.calls && a.landing && !stopped && !staged ? zoneCenter(other(a.team), a.landing) : null;
 		const onLine = landed && a?.calls ? shotPoint(other(a.team), a.landing!, a.calls.shot) : null;
 		if (landed && onLine && onLine.x !== landed.x && ballTarget.x === landed.x && ballTarget.y === landed.y) {
@@ -97,17 +103,24 @@
 		}
 		return { x: ballTarget.x + BALL_OFFSET.x, y: ballTarget.y + BALL_OFFSET.y };
 	});
+	/** A blocked ball goes into the blocker's hands at the net before it ends up where it lands. */
+	const via = $derived(staged ? null : blockHands(game, pos));
 	let flight = $state.raw(untrack(() => ({ from: ballSpot, to: ballSpot, apex: 0 })));
+	/** Where the ball is headed; with a block, the flight's first leg ends short of it. */
+	let heading = untrack(() => ballSpot);
+	/** Bumped for every new flight, so a block's second leg doesn't start after a newer flight. */
+	let flights = 0;
 	/** The possession's earlier flights (serve, pass, set), kept as dotted lines for reference. */
 	let earlier = $state.raw<string[]>([]);
 	let lastKind: FlightKind = 'lob';
 	const progress = new Tween(1);
 	$effect(() => {
 		const to = ballSpot;
+		const stop = via;
 		const kind = flightKind(game, staged !== null);
-		const { apex, ms } = FLIGHT[kind];
 		untrack(() => {
-			if (to.x === flight.to.x && to.y === flight.to.y) return;
+			if (to.x === heading.x && to.y === heading.y) return;
+			heading = to;
 			// A serve or an attack starts a new picture; a pass or set adds to the build-up.
 			const attack = (k: FlightKind) => k === 'spike' || k === 'tip';
 			const before = pathOf(flight);
@@ -115,10 +128,21 @@
 			lastKind = kind;
 			// Start from wherever the ball's shadow is now, even if it was still in the air.
 			const from = arcPoint(flight.from, flight.to, flight.apex, progress.current).ground;
-			flight = { from, to, apex };
 			const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-			progress.set(0, { duration: 0 });
-			progress.set(1, { duration: reduced ? 0 : ms });
+			const fly = (start: Point, end: Point, k: FlightKind) => {
+				flight = { from: start, to: end, apex: FLIGHT[k].apex };
+				progress.set(0, { duration: 0 });
+				return progress.set(1, { duration: reduced ? 0 : FLIGHT[k].ms });
+			};
+			const id = ++flights;
+			if (!stop) return void fly(from, to, kind);
+			// Into the block, then off it: the first leg stays on the court as a trail.
+			fly(from, stop, kind).then(() => {
+				if (id !== flights) return;
+				const into = pathOf(flight);
+				if (into) earlier = [...earlier, into];
+				fly(stop, to, 'drop');
+			});
 		});
 	});
 	const ball = $derived(arcPoint(flight.from, flight.to, flight.apex, progress.current));
@@ -142,14 +166,19 @@
 	/** Once the step's result is on screen, the dice fade so the play stands out. */
 	const resolved = $derived(dice.key === game.steps);
 
-	// Big moments shake the court briefly.
-	let shaking = $state(false);
+	// Big moments make the court react: a shake or a harder smash for a kill, a slam back toward the
+	// hitter for a stuff block, and a hanging zoom with ripples for a tip kill.
+	const IMPACT_MS: Record<Impact, number> = { shake: 450, smash: 700, slam: 550, tip: 1000 };
+	let impact = $state<Impact | null>(null);
 	$effect(() => {
-		if (!moment?.epic || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-		shaking = true;
-		const stop = setTimeout(() => (shaking = false), 450);
+		const next = moment?.impact;
+		if (!next || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		impact = next;
+		const stop = setTimeout(() => (impact = null), IMPACT_MS[next]);
 		return () => clearTimeout(stop);
 	});
+	/** A stuff block jolts the court toward the hitter's side: down for A (bottom), up for B. */
+	const slamDir = $derived(a?.team === 'B' ? -1 : 1);
 
 	// Intended shot: dashed, from the hitter to the called zone. Actual shot: solid, to where it landed.
 	// A line shot runs straight down the sideline, so both arrows start on that line too.
@@ -181,7 +210,7 @@
 </script>
 
 <figure>
-	<div class="stage" class:shaking>
+	<div class="stage {impact ?? ''}" style:--slam-dir={slamDir}>
 	<svg viewBox="0 0 {VIEW.width} {VIEW.height}" role="img" aria-label="Court">
 		<defs>
 			<marker id="head-intended" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -291,7 +320,13 @@
 
 		{#if scored}
 			{#key game.steps}
-				<circle class="impact" cx={ballSpot.x} cy={ballSpot.y} r="10" />
+				<circle class="impact" class:big={moment?.impact === 'smash'} cx={ballSpot.x} cy={ballSpot.y} r="10" />
+				<!-- A tip lands softly: rings spread out from where it drops. -->
+				{#if moment?.impact === 'tip'}
+					{#each [0, 1, 2] as i (i)}
+						<circle class="ripple" style:animation-delay="{250 + i * 180}ms" cx={ballSpot.x} cy={ballSpot.y} r="8" />
+					{/each}
+				{/if}
 			{/key}
 		{/if}
 
@@ -360,8 +395,93 @@
 		max-width: max(var(--court-min, 260px), calc((100dvh - var(--chrome-h, 220px)) * 300 / 560));
 		margin: 0 auto;
 	}
-	.shaking {
+	.shake {
 		animation: shake 450ms ease-out;
+	}
+	/* A crushing kill: a punch-in, then a bigger, longer shake. */
+	.smash {
+		animation: smash 700ms cubic-bezier(0.2, 0.8, 0.3, 1);
+	}
+	@keyframes smash {
+		8% {
+			transform: scale(1.035);
+		}
+		18% {
+			transform: translate(-11px, 6px) rotate(-1.1deg) scale(1.02);
+		}
+		30% {
+			transform: translate(10px, -5px) rotate(1deg);
+		}
+		42% {
+			transform: translate(-7px, 4px) rotate(-0.6deg);
+		}
+		56% {
+			transform: translate(5px, -2px) rotate(0.3deg);
+		}
+		72% {
+			transform: translate(-2px, 1px);
+		}
+	}
+	/* A stuff block: the court jolts back toward the hitter, then settles, and the net flashes. */
+	.slam {
+		animation: slam 550ms ease-out;
+	}
+	@keyframes slam {
+		10% {
+			transform: translateY(calc(var(--slam-dir) * 14px)) scale(1.025);
+		}
+		26% {
+			transform: translateY(calc(var(--slam-dir) * -6px));
+		}
+		44% {
+			transform: translate(3px, calc(var(--slam-dir) * 4px));
+		}
+		64% {
+			transform: translate(-2px, calc(var(--slam-dir) * -2px));
+		}
+	}
+	.slam .net {
+		animation: net-flash 550ms ease-out;
+	}
+	@keyframes net-flash {
+		15% {
+			fill: var(--block);
+			filter: drop-shadow(0 0 4px var(--block)) drop-shadow(0 0 10px var(--block));
+		}
+	}
+	/* A tip kill: the court leans in and hangs for a beat, like slow motion, then lets go. */
+	.tip {
+		animation: tip-hang 1000ms cubic-bezier(0.3, 0, 0.2, 1);
+	}
+	@keyframes tip-hang {
+		30% {
+			transform: scale(1.045) rotate(0.4deg);
+		}
+		60% {
+			transform: scale(1.045) rotate(0.4deg);
+		}
+		75% {
+			transform: scale(0.99);
+		}
+	}
+	.ripple {
+		fill: none;
+		stroke: var(--actual);
+		stroke-width: 1.5;
+		opacity: 0;
+		transform-box: fill-box;
+		transform-origin: center;
+		animation: ripple 1100ms ease-out forwards;
+	}
+	@keyframes ripple {
+		from {
+			transform: scale(0.5);
+			opacity: 0.9;
+		}
+		to {
+			transform: scale(5);
+			opacity: 0;
+		}
 	}
 	@keyframes shake {
 		15% {
@@ -434,8 +554,24 @@
 			opacity: 0;
 		}
 	}
+	.impact.big {
+		stroke-width: 4;
+		animation-name: impact-big;
+		animation-duration: 900ms;
+	}
+	@keyframes impact-big {
+		from {
+			transform: scale(0.4);
+			opacity: 1;
+		}
+		to {
+			transform: scale(7);
+			opacity: 0;
+		}
+	}
 	@media (prefers-reduced-motion: reduce) {
-		.impact {
+		.impact,
+		.ripple {
 			animation: none;
 			opacity: 0;
 		}
@@ -490,11 +626,11 @@
 		stroke: var(--actual);
 		stroke-width: 2.5;
 	}
+	/* Where the ball actually went: solid, since dashed lines are only for the shot that was called. */
 	.trail {
 		fill: none;
 		stroke: var(--actual);
-		stroke-width: 1.5;
-		stroke-dasharray: 2 4;
+		stroke-width: 1.25;
 		stroke-linecap: round;
 		animation: trail 1200ms ease-out forwards;
 	}

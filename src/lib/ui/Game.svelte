@@ -5,11 +5,10 @@
 	import Controls from '#lib/ui/Controls.svelte';
 	import DebugDrawer from '#lib/ui/DebugDrawer.svelte';
 	import Rules from '#lib/ui/Rules.svelte';
-	import RallyHistory from '#lib/ui/RallyHistory.svelte';
+	import BuildUp from '#lib/ui/BuildUp.svelte';
 	import ScoreLine from '#lib/ui/ScoreLine.svelte';
-	import ScorePanel from '#lib/ui/ScorePanel.svelte';
-	import { scoreSheet, type ScoreSheet } from '#lib/ui/scores.ts';
-	import { needsDefence, needsShot, nextAction, playsItself, statusLine, stepEntries } from '#lib/ui/story.ts';
+	import { clearsSheet, scoreSheet, type ScoreSheet } from '#lib/ui/scores.ts';
+	import { commentary, needsDefence, needsShot, nextAction, playsItself, prompt, quietLine, statusLine, stepEntries } from '#lib/ui/story.ts';
 	import Court from '#lib/ui/Court.svelte';
 	import { ROLL_MS } from '#lib/ui/Die.svelte';
 	import {
@@ -23,6 +22,19 @@
 		type Positions
 	} from '#lib/ui/layout.ts';
 	import TopBar from '#lib/ui/TopBar.svelte';
+
+	/** On /admin: the debug panel (D) for the seed, who you control, and playing ahead. */
+	let { admin = false }: { admin?: boolean } = $props();
+
+	/**
+	 * How the play is described under the court, while we compare (?commentary=…): `line` is one line
+	 * for the latest moment, `off` only says whose call it is and how the point ended, `feed` keeps
+	 * the whole rally's commentary on screen.
+	 */
+	type Commentary = 'line' | 'off' | 'feed';
+	const mode: Commentary = ((m) => (m === 'off' || m === 'feed' ? m : 'line'))(
+		new URLSearchParams(location.search).get('commentary')
+	);
 
 	const randomSeed = () => Math.floor(Math.random() * 1_000_000);
 	/** Time for a player to run to where they roll (matches the chip tween). */
@@ -54,11 +66,11 @@
 	let defence = $state<{ block: Channel; stance: Stance }>({ block: 'line', stance: 'deep' });
 	const defending = $derived(needsDefence(shown, controlled) && shown === game);
 	let debugOpen = $state(false);
-	/** The latest attack's numbers. They stay up after the rally ends, until the next ball is set or a new game. */
+	/** The latest attack's numbers. They stay up after the attack, until a new possession or rally starts (see clearsSheet). */
 	let sheet = $state.raw<ScoreSheet | null>(null);
 	$effect(() => {
 		const next = scoreSheet(shown);
-		if (next || shown.steps === 0) sheet = next;
+		if (next || shown.steps === 0 || clearsSheet(shown)) sheet = next;
 	});
 	let rules: Rules;
 	let scoreLine: ScoreLine;
@@ -66,7 +78,13 @@
 	let dice = $state.raw<{ key: number; items: (PlacedDie & { step: number })[] }>({ key: 0, items: [] });
 	let timers: ReturnType<typeof setTimeout>[] = [];
 	/** Steps still to play on their own after the one on screen. */
-	let pending: Game[] = [];
+	let pending = $state.raw<Game[]>([]);
+	/**
+	 * Play is running on its own (a step animating, or the serve, pass or set still to come): the
+	 * main button waits, showing where play is heading, until it's the player's turn again.
+	 */
+	const busy = $derived(shown !== game || pending.length > 0);
+	const heading = $derived(pending.at(-1) ?? game);
 
 	const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -128,8 +146,15 @@
 		pending = chain.slice(1);
 		const next = () => {
 			const after = game.phase.kind === 'hit' ? AFTER_CALLS_MS : stepEntries(game).some((e) => e.tag === 'hit') ? AFTER_ATTACK_MS : BETWEEN_MS;
-			const following = pending.shift();
-			if (following) timers.push(setTimeout(() => show(following, true, next), after));
+			// A step leaves the queue only when it starts, so play counts as busy through the pause before it.
+			const [following, ...rest] = pending;
+			if (!following) return;
+			timers.push(
+				setTimeout(() => {
+					pending = rest;
+					show(following, true, next);
+				}, after)
+			);
 		};
 		show(first, true, next);
 	}
@@ -194,7 +219,7 @@
 		if (scoreLine.isOpen()) return;
 		if (e.key === '?' || (e.key === '/' && e.shiftKey)) return rules.toggle();
 		if (rules.isOpen()) return;
-		if (e.key === 'd' || e.key === 'D') return (debugOpen = !debugOpen);
+		if (admin && (e.key === 'd' || e.key === 'D')) return (debugOpen = !debugOpen);
 		if (e.key === 'Escape' && debugOpen) return (debugOpen = false);
 		const shot = SHOT_KEYS[e.key.toLowerCase()];
 		if (shot && choosing) {
@@ -228,95 +253,81 @@
 <svelte:window {onkeydown} />
 
 <svelte:head>
-	<title>Volley</title>
+	<title>{admin ? 'Volley admin' : 'Volley'}</title>
 </svelte:head>
 
-<!-- --chrome-h is roughly the top bar plus the dock (and the rally history and scoreline when narrow), so the court fills the rest of the screen. -->
-<main>
-	<TopBar game={shown} {debugOpen} onhelp={() => rules.toggle()} ondebug={() => (debugOpen = !debugOpen)} />
-	<div class="play">
-		<div class="side"><ScorePanel {sheet} /></div>
-		<div class="centre">
-			<Court
-				game={shown}
-				{dice}
-				{staged}
-				preview={choosing ? (preview ?? shotPick) : null}
-				defencePreview={defending ? defence : null}
-				onshot={choosing ? choose : null}
-				onpreview={(s) => (preview = s)}
-			/>
-			<RallyHistory game={shown} />
-			<ScoreLine {sheet} bind:this={scoreLine} />
-			<Controls
-				status={statusLine(shown, controlled)}
-				{choosing}
-				{defending}
-				bind:defence
-				ondefend={setDefence}
-				shot={shotPick}
-				onshot={choose}
-				onattack={attack}
-				onpreview={(s) => (preview = s)}
-				over={shown.phase.kind === 'gameOver'}
-				next={nextAction(shown, controlled)}
-				onstep={stepOnce}
-				onnewgame={newSeed}
-			/>
-		</div>
-	</div>
+<!-- One column at every size: the court, the controls, then how the attack was built and its scores.
+     --chrome-h is roughly everything but the court, so the court fills the rest of the screen. -->
+<main class:feed={mode === 'feed'}>
+	<TopBar game={shown} {debugOpen} onhelp={() => rules.toggle()} ondebug={admin ? () => (debugOpen = !debugOpen) : null} />
+	<Court
+		game={shown}
+		{dice}
+		{staged}
+		preview={choosing ? (preview ?? shotPick) : null}
+		defencePreview={defending ? defence : null}
+		onshot={choosing ? choose : null}
+		onpreview={(s) => (preview = s)}
+	/>
+	<Controls
+		status={mode === 'line' ? statusLine(shown, controlled) : mode === 'off' ? quietLine(shown, controlled) : (prompt(shown, controlled) ?? '')}
+		feed={mode === 'feed' ? commentary(shown) : null}
+		{choosing}
+		{defending}
+		bind:defence
+		ondefend={setDefence}
+		shot={shotPick}
+		onshot={choose}
+		onattack={attack}
+		onpreview={(s) => (preview = s)}
+		over={shown.phase.kind === 'gameOver'}
+		next={nextAction(busy ? heading : shown, controlled)}
+		{busy}
+		onstep={stepOnce}
+		onnewgame={newSeed}
+	/>
+	<BuildUp game={shown} />
+	<ScoreLine {sheet} bind:this={scoreLine} />
 </main>
-<DebugDrawer
-	bind:open={debugOpen}
-	game={shown}
-	bind:seed
-	bind:controlled
-	onrally={playRallyOrUntilChoice}
-	ongame={() => {
-		pending = [];
-		show(playGame(game), false);
-	}}
-	onreset={reset}
-	onnewseed={newSeed}
-/>
+{#if admin}
+	<DebugDrawer
+		bind:open={debugOpen}
+		game={shown}
+		bind:seed
+		bind:controlled
+		onrally={playRallyOrUntilChoice}
+		ongame={() => {
+			pending = [];
+			show(playGame(game), false);
+		}}
+		onreset={reset}
+		onnewseed={newSeed}
+	/>
+{/if}
 <Rules bind:this={rules} />
 
 <style>
 	main {
-		max-width: 880px;
+		max-width: 600px;
 		margin: 0 auto;
 		padding: 0 16px 8px;
-		--chrome-h: 230px;
-	}
-	/* Scores on the left of the court (the debug drawer slides in on the right). */
-	.play {
-		display: grid;
-		grid-template-columns: 260px minmax(0, 560px);
-		justify-content: center;
-		gap: 16px;
-		align-items: start;
-	}
-	.side {
-		padding-top: 8px;
-	}
-	/* Narrower, the court takes the full width and a one-row scoreline under it stands in for the panel. */
-	@media (max-width: 860px) {
-		main {
-			--chrome-h: 338px;
-		}
-		.play {
-			grid-template-columns: minmax(0, 1fr);
-		}
-		.side {
-			display: none;
-		}
+		--chrome-h: 346px;
 	}
 	/* The top bar fits in one row on a phone. With the browser's bars showing, a phone can be short:
 	   let the court shrink further rather than push the controls off the screen. */
 	@media (max-width: 600px) {
 		main {
-			--chrome-h: 324px;
+			--chrome-h: 332px;
 			--court-min: 200px;
+		}
+	}
+	/* The commentary feed is a few lines taller than the one-line status. */
+	main.feed {
+		--chrome-h: 420px;
+	}
+	@media (max-width: 600px) {
+		main.feed {
+			--chrome-h: 406px;
 		}
 	}
 </style>

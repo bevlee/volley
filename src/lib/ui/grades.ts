@@ -2,9 +2,12 @@ import type { Shot } from '../engine/types';
 
 /**
  * One word for how well each touch went, so passes, digs, sets and hits read the same way.
- * The numbers stay behind the scenes; the score panel shows them on hover.
+ * The numbers stay behind the scenes; the score sheet shows them.
  */
 export type Grade = 'Perfect' | 'Good' | 'Shaky' | 'Poor';
+
+/** A penalty to show beside a grade, e.g. " −2"; nothing for a bonus of zero or more, which the grade already says. */
+export const penalty = (mod: number) => (mod < 0 ? ` −${-mod}` : '');
 
 /** A pass or dig, by its first-touch bonus (−2 to +2, see rules.firstTouch). */
 export function touchGrade(mod: number): Grade {

@@ -1,4 +1,4 @@
-import { other } from '../engine/rally';
+import { other, partner } from '../engine/rally';
 import { firstTouch } from '../engine/rules';
 import type { Game, LogEntry, Phase, Shot, Slot, TeamId } from '../engine/types';
 import { setGrade, touchGrade } from './grades';
@@ -71,13 +71,21 @@ export function narrate(e: LogEntry): string {
 	}
 }
 
+/**
+ * How the court reacts to a moment: `shake` for a hard kill or a big dig, `smash` for a crushing one
+ * (or a double six, or the game point), `slam` for a stuff block jolting back at the hitter, and
+ * `tip` for a tip kill: a softer, hanging beat with ripples where it drops.
+ */
+export type Impact = 'shake' | 'smash' | 'slam' | 'tip';
+
 export interface Callout {
 	text: string;
 	sub: string;
 	/** The team the moment is good for; the callout takes their colour. */
 	team: TeamId;
-	/** Big moments get a bigger callout and shake the court. */
+	/** Big moments get a bigger callout. */
 	epic: boolean;
+	impact: Impact | null;
 	/** Changes every step, so the same callout twice still re-animates. */
 	key: number;
 }
@@ -92,46 +100,49 @@ export function callout(g: Game): Callout | null {
 	const acc = find(entries, 'accuracy');
 	const swing = find(entries, 'swing');
 	const set = find(entries, 'set');
-	const make = (text: string, sub: string, team: unknown, epic = false): Callout => ({
+	const make = (text: string, sub: string, team: unknown, epic = false, impact: Impact | null = null): Callout => ({
 		text,
 		sub,
 		team: team as TeamId,
 		epic,
+		impact,
 		key: g.steps
 	});
 
 	if (point?.gameOver) {
 		const [won, lost] = point.winner === 'A' ? [point.scoreA, point.scoreB] : [point.scoreB, point.scoreA];
-		return make(`Team ${point.winner} wins!`, `${won}–${lost}`, point.winner, true);
+		return make(`Team ${point.winner} wins!`, `${won}–${lost}`, point.winner, true, 'smash');
 	}
 
 	// One plain word per outcome: Kill, Block, Block touch, Dig, Easy ball over or Error.
-	// Big moments shake the court (epic) rather than getting a different word.
+	// Big moments get a bigger callout and a court reaction rather than a different word.
 	if (point) {
 		switch (point.kind) {
 			case 'guaranteed kill':
-				return make('Kill!', 'Perfect set, perfect hit', point.winner, true);
+				return make('Kill!', 'Double six: set roll 6, power roll 6', point.winner, true, 'smash');
 			case 'shank':
 				return swing
 					? make('Error!', `${swing.player} ${swing.shot === 'tip' ? 'tips' : 'hits'} it into the net`, point.winner)
 					: make('Error!', `${set?.player} can't keep it in play`, point.winner);
 			case 'stuff':
-				return make('Block!', `${block?.player} blocks ${hit?.player}`, point.winner, true);
+				return make('Block!', `${block?.player} blocks ${hit?.player}`, point.winner, true, 'slam');
 			case 'kill': {
 				if (hit?.shot === 'tip') {
-					return make('Kill!', dig?.read ? `${dig.player} can't reach the tip` : `${hit.player} tips it in`, point.winner);
+					return make('Kill!', dig?.read ? `${dig.player} can't reach the tip` : `${hit.player} tips it in`, point.winner, false, 'tip');
 				}
 				const margin = Number(dig?.attack) - Number(dig?.total);
 				const sub = dig?.read ? `Too hot for ${dig.player}` : `${dig?.player} out of position`;
-				return make('Kill!', sub, point.winner, margin >= 8);
+				const big = margin >= 8;
+				return make('Kill!', sub, point.winner, big, big ? 'smash' : 'shake');
 			}
 		}
 	}
 
 	if (dig?.up) {
-		if (dig.shot === 'tip' && dig.stance === 'short') return make('Dig!', `${dig.player} dives for the tip`, dig.team, true);
-		if (!dig.read) return make('Dig!', `${dig.player} keeps it alive`, dig.team, true);
-		return make('Dig!', `${dig.player} reads it`, dig.team, Number(dig.attack) >= 14);
+		if (dig.shot === 'tip' && dig.stance === 'short') return make('Dig!', `${dig.player} dives for the tip`, dig.team, true, 'shake');
+		if (!dig.read) return make('Dig!', `${dig.player} keeps it alive`, dig.team, true, 'shake');
+		const hard = Number(dig.attack) >= 14;
+		return make('Dig!', `${dig.player} reads it`, dig.team, hard, hard ? 'shake' : null);
 	}
 	if (block?.result === 'touch') return make('Block touch', `${block.player} gets fingers to it`, block.team);
 	if (acc?.result === 'easy' && hit) return make('Easy ball over', `Free ball to Team ${other(hit.team as TeamId)}`, other(hit.team as TeamId));
@@ -166,8 +177,9 @@ export function nextAction(g: Game, controlled: TeamId | null = null): string {
 			return 'Set';
 		case 'calls':
 			return 'Attack!';
+		// The calls are in and the attack is already on its way, whoever's it is: Space just skips ahead.
 		case 'hit':
-			return 'Attack!';
+			return 'Skip';
 		case 'pointOver':
 			return 'Next rally';
 		case 'gameOver':
@@ -175,13 +187,36 @@ export function nextAction(g: Game, controlled: TeamId | null = null): string {
 	}
 }
 
-/** One line under the court: whose call it is, or what just happened. */
-export function statusLine(g: Game, controlled: TeamId | null): string {
+/** Whose call it is, when it's the player's: their attack or their defence. */
+export function prompt(g: Game, controlled: TeamId | null): string | null {
 	const a = g.attack;
 	if (a && needsShot(g, controlled)) return `Your attack · ${g.teams[a.team][a.hitter].name} is hitting`;
 	if (a && needsDefence(g, controlled)) return `Your defence · ${g.teams[a.team][a.hitter].name} is about to attack`;
+	return null;
+}
+
+/** One line under the court: whose call it is, or what just happened. */
+export function statusLine(g: Game, controlled: TeamId | null): string {
 	const last = g.log[g.log.length - 1];
-	return last ? narrate(last) : '';
+	return prompt(g, controlled) ?? (last ? narrate(last) : '');
+}
+
+/** Just the player's call and how the point ended, with no commentary on the touches in between. */
+export function quietLine(g: Game, controlled: TeamId | null): string {
+	const last = g.log[g.log.length - 1];
+	return prompt(g, controlled) ?? (last?.tag === 'point' ? narrate(last) : '');
+}
+
+/**
+ * The rally so far as commentary, one line per moment, oldest first. "B2 to serve" gives way to the
+ * serve itself, and the opening free ball is left out since the serve already says who receives.
+ */
+export function commentary(g: Game): string[] {
+	const rally = g.log.filter((e) => e.rally === g.rally && e.tag);
+	const served = rally.some((e) => e.tag === 'serve');
+	return rally
+		.filter((e) => !(e.tag === 'rallyStart' && served) && !(e.tag === 'freeBall' && e.data?.start))
+		.map(narrate);
 }
 
 export type Move = 'spike' | 'tip' | 'block' | 'dig' | 'dive';
@@ -199,10 +234,17 @@ export function playerActions(g: Game): Record<string, Action> {
 	const hit = find(entries, 'hit') ?? find(entries, 'swing');
 	const block = find(entries, 'block');
 	const dig = find(entries, 'dig');
+	// Two 1s in a row is a shank: on the hit, or on the set when the pass was a 1 too.
+	const shank = find(entries, 'point')?.kind === 'shank';
 	const actions: Record<string, Action> = {};
 	if (hit) {
 		const tipped = hit.shot === 'tip';
-		actions[`${hit.team}-${hit.slot as Slot}`] = { move: tipped ? 'tip' : 'spike', label: tipped ? 'tip!' : 'spike!' };
+		// A stuffed spike goes unlabelled: the blocker's "block!" is the moment.
+		const stuffed = block?.result === 'stuff';
+		const label = shank ? 'shank!' : stuffed ? '' : tipped ? 'tip!' : 'spike!';
+		actions[`${hit.team}-${hit.slot as Slot}`] = { move: tipped ? 'tip' : 'spike', label };
+	} else if (shank && g.attack) {
+		actions[`${g.attack.team}-${partner(g.attack.hitter)}`] = { move: 'dig', label: 'shank!' };
 	}
 	if (block) {
 		const label = block.result === 'stuff' ? 'block!' : block.result === 'touch' ? 'block touch' : '';

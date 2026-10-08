@@ -8,7 +8,7 @@
 {#if callout}
 	{#key callout.key}
 		<!-- Sits in the half of the team it's good for, in the band furthest from any player. -->
-		<div class="callout {callout.team}" class:epic={callout.epic} role="status" style:top="{top}%">
+		<div class="callout {callout.team}" class:epic={callout.epic} class:float={callout.impact === 'tip'} role="status" style:top="{top}%">
 			<span class="text">{callout.text}</span>
 			<span class="sub">{callout.sub}</span>
 		</div>
@@ -28,7 +28,8 @@
 		text-align: center;
 		width: max-content;
 		max-width: 92%;
-		animation: pop 1900ms cubic-bezier(0.2, 0.9, 0.3, 1.2) forwards;
+		/* Pops in, then stays until the next step replaces or clears it. */
+		animation: pop 450ms cubic-bezier(0.2, 0.9, 0.3, 1.2) forwards;
 	}
 	.text {
 		font-size: clamp(1.1rem, 10cqi, 2.6rem);
@@ -63,40 +64,41 @@
 	.B .text {
 		color: var(--team-b);
 	}
+	/* A tip's callout drifts down into place, like the ball, instead of punching in. */
+	.float {
+		animation: float 800ms cubic-bezier(0.25, 0.8, 0.3, 1) forwards;
+	}
+	@keyframes float {
+		0% {
+			opacity: 0;
+			transform: translate(-50%, -110%) scale(0.92) rotate(0deg);
+		}
+		60% {
+			opacity: 1;
+		}
+		100% {
+			opacity: 1;
+			transform: translate(-50%, -50%) scale(1) rotate(-3deg);
+		}
+	}
 	@keyframes pop {
 		0% {
 			opacity: 0;
 			transform: translate(-50%, -50%) scale(0.3) rotate(-6deg);
 		}
-		14% {
+		58% {
 			opacity: 1;
 			transform: translate(-50%, -50%) scale(1.12) rotate(-3deg);
 		}
-		24% {
-			transform: translate(-50%, -50%) scale(1) rotate(-3deg);
-		}
-		80% {
+		100% {
 			opacity: 1;
 			transform: translate(-50%, -50%) scale(1) rotate(-3deg);
-		}
-		100% {
-			opacity: 0;
-			transform: translate(-50%, -60%) scale(0.96) rotate(-3deg);
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.callout {
-			animation: fade 1900ms forwards;
-			transform: translate(-50%, -50%);
-		}
-		@keyframes fade {
-			0%,
-			80% {
-				opacity: 1;
-			}
-			100% {
-				opacity: 0;
-			}
+			animation: none;
+			transform: translate(-50%, -50%) rotate(-3deg);
 		}
 	}
 </style>

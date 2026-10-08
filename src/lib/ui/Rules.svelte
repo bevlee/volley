@@ -36,8 +36,8 @@
 		<p>
 			Every pass, dig, set and hit is graded <b>Perfect</b>, <b>Good</b>, <b>Shaky</b> or <b>Poor</b>. A
 			better pass or dig makes the set better, and a better set makes the hit harder and more accurate.
-			Two natural 1s in a row (pass then set, or set then hit) is an error and loses the point. Hover a
-			score to see the numbers.
+			Two natural 1s in a row (pass then set, or set then hit) is an error and loses the point. Tap a
+			score under the court to see the numbers.
 		</p>
 
 		<h3>Aim</h3>
@@ -45,7 +45,7 @@
 		<table>
 			<tbody>
 				<tr><td>On target</td><td>Lands where you called it</td></tr>
-				<tr><td>A bit off</td><td>Drifts a zone toward the defender</td></tr>
+				<tr><td>A bit off</td><td>Drifts toward the defender: a zone over, or straight to them if they read the shot</td></tr>
 				<tr><td>Badly off</td><td>A hard shot goes straight into the block, even if the blocker guarded the other side. A tip just drifts.</td></tr>
 				<tr><td>Way off</td><td>An easy ball over to the other side</td></tr>
 			</tbody>
@@ -70,7 +70,7 @@
 			Any defence covers two of the three shots and leaves one open. The court shades them:
 			<span class="bad">red</span> where the blocker or defender is covering, <span class="ok">green</span>
 			where it's open. Attack the open zone and it's hard to stop. Attack a covered one and you need
-			better dice. A defender already covering the shot gets +{config.readBonus} on the dig.
+			better dice. A defender who reads the attack (already covering the called shot) gets +{config.readBonus} on the dig.
 		</p>
 
 		<h3>On the court</h3>
@@ -78,15 +78,15 @@
 			<li>Dashed arrow: the shot that was called. Solid arrow: where it went.</li>
 			<li>Dice appear where they're rolled, then fade once the result is shown.</li>
 			<li>
-				The scores beside the court show the latest attack, block and dig totals, and what the set adds
-				to the hit. Hover or tap a score to see how it adds up.
+				Under the court: how the attack was built (the pass, dig or block touch, then the set), then the
+				attack, block and dig scores. Tap a score to see how it adds up.
 			</li>
 		</ul>
 
 		<h3>Keys</h3>
 		<p>
 			<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> pick a shot · <kbd>1</kbd>–<kbd>4</kbd> pick a defence · <kbd>Space</kbd> roll
-			the attack, or serve the next rally · <kbd>?</kbd> rules · <kbd>D</kbd> debug panel. The serve, pass and set play
+			the attack, or serve the next rally · <kbd>?</kbd> rules. The serve, pass and set play
 			on their own; Space skips ahead.
 		</p>
 	</div>
