@@ -12,7 +12,6 @@ import {
 	leave,
 	newCode,
 	newSeed,
-	normaliseCode,
 	saved,
 	snapshot,
 	teamOf,
@@ -24,6 +23,7 @@ import {
 } from './room';
 import type { GameStore } from './store';
 import { isPlayerId } from './uploads';
+import { normaliseCode } from '../online/codes';
 
 /**
  * Connects rooms to Socket.IO. Each browser connects with `auth: { playerId }` and joins a Socket.IO
@@ -121,6 +121,8 @@ export function attachSockets(http: HttpServer, { store, now = Date.now, sweepMs
 		socket.join(channel(playerId));
 		sockets.set(playerId, (sockets.get(playerId) ?? 0) + 1);
 		const s = seated(playerId);
+		// First, so the page knows whether to show the menu or wait for its game's snapshot.
+		socket.emit('welcome', { seated: !!s });
 		if (s) {
 			deliver(s.room, connect(s.room, s.team, now()));
 			schedule(s.room);

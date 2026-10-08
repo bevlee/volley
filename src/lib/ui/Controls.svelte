@@ -13,7 +13,10 @@
 		onpreview,
 		over,
 		next,
+		stepDisabled = false,
 		onstep,
+		overLabel = 'New game',
+		overDisabled = false,
 		onnewgame
 	}: {
 		/** One line on whose call it is or what just happened. */
@@ -33,9 +36,14 @@
 		/** Hovering or focusing a shot previews it on the court; null when it stops. */
 		onpreview: (shot: Shot | null) => void;
 		over: boolean;
-		/** What the next step does, e.g. "Attack!". */
+		/** What the next step does, e.g. "Attack!", or what it's waiting for online. */
 		next: string;
+		/** Online, when it's the other player's move. */
+		stepDisabled?: boolean;
 		onstep: () => void;
+		/** The game-over button: "New game", or "Rematch" online. */
+		overLabel?: string;
+		overDisabled?: boolean;
 		onnewgame: () => void;
 	} = $props();
 
@@ -64,7 +72,7 @@
 	<p class="status" aria-live="polite">{status}</p>
 	<div class="row">
 		{#if over}
-			<button class="primary" onclick={(e) => run(e, onnewgame)}>New game</button>
+			<button class="primary" disabled={overDisabled} onclick={(e) => run(e, onnewgame)}>{overLabel}</button>
 		{:else if choosing}
 			<span class="group" role="group" aria-label="Shot">
 				{#each SHOTS as s (s.shot)}
@@ -101,8 +109,8 @@
 			</span>
 			<button class="primary" onclick={(e) => run(e, ondefend)}>Lock in <kbd>Space</kbd></button>
 		{:else}
-			<button class="primary wide" onclick={(e) => run(e, onstep)} title="Space or → also steps">
-				{next} <kbd>Space</kbd>
+			<button class="primary wide" disabled={stepDisabled} onclick={(e) => run(e, onstep)} title="Space or → also steps">
+				{next}{#if !stepDisabled}&nbsp;<kbd>Space</kbd>{/if}
 			</button>
 		{/if}
 	</div>

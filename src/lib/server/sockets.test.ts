@@ -124,7 +124,9 @@ describe('sockets', () => {
 		expect(await away).toEqual({ event: 'presence', opponent: 'away' });
 
 		const back = player(url, a.id);
+		const welcome = new Promise((r) => back.socket.once('welcome', r));
 		const snap = back.next('snapshot');
+		expect(await welcome).toEqual({ seated: true });
 		const here = b.next('presence');
 		const s = await snap;
 		expect(s).toMatchObject({ code, team: 'A', opponent: 'connected' });
@@ -135,7 +137,9 @@ describe('sockets', () => {
 		const { url } = await startServer();
 		const { code } = await pair(url);
 		const c = player(url);
+		const welcome = new Promise((r) => c.socket.once('welcome', r));
 		await connected(c);
+		expect(await welcome).toEqual({ seated: false });
 		expect(await c.ask('join', 'ZZZZ')).toEqual({ error: 'No game with that code' });
 		expect(await c.ask('join', code)).toEqual({ error: 'That room is full' });
 	});

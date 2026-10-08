@@ -11,9 +11,9 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173 and press Space to play. When it's your call, pick a shot (or a block and dig) and press Space to roll the attack.
+Then open http://localhost:5173 and pick **Play vs computer**, or **Play vs opponent** to make or join a room (open a second browser to play yourself). Press Space to play. When it's your call, pick a shot (or a block and dig) and press Space to roll the attack.
 
-Online play runs on the same dev server. Without `PGHOST` set, saved games are kept in memory until it restarts. To run the production build locally:
+Online play runs on the same dev server, with a 20-second clock per move. Without `PGHOST` set, saved games are kept in memory until it restarts. To run the production build locally:
 
 ```sh
 npm run build

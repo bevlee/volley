@@ -49,7 +49,7 @@ So the server holds the true `Game`, runs `step` itself and sends clients copies
 
 The game only waits for players in two places: **the call** and **the serve** (at the start of the game and after each point). Everything else plays on its own, as it does now.
 
-1. **Lobby.** The landing page gets a third option next to playing against the computer: *Create room* / *Join room [code]*. The creator is Team A, the joiner is Team B. The creator sees the code and a copy-link button while they wait.
+1. **Lobby.** `/` is a main screen with *Play vs computer* (`/computer`) and *Play vs opponent* (`/online`). `/online` has *Create room* and *Join game* (a code box). The creator is Team A, the joiner is Team B. The creator sees the code and a *Copy invite link* button (`/online?code=KXQT`) while they wait. A code in the wrong format or with no room shows a "Not valid" toast (svelte-sonner) and stays on the join form; a full room says "That game is full". The game stays at `/online` rather than getting its own URL: the server reseats you by `playerId` after a reload, and the `?code=` link covers invites. *Leave game* gives up the seat.
 2. **Serve.** In the `serve` and `pointOver` phases, the serving team's player presses Space or Serve, or the clock serves for them. The other player sees "Waiting for B2 to serve". The server steps through the auto phases (serve, pass, set) up to `calls` and sends the whole chain of states.
 3. **Calls.** Both players pick at the same time, the attacker a shot and the defender a block and dig, as in single player now. After locking in you see "Waiting for the other team". The opponent sees only that you've locked in, never your call. If a clock runs out, the computer makes that side's call (see [Turn clock](#turn-clock)). Once both calls are in, the server steps the `calls` phase with both choices, steps `hit`, runs any auto phases that follow, and sends the chain.
 4. **Point over / game over.** Back to step 2. At game over the server saves the game and sends both players its replay link. Either player can press *Rematch*. The game starts once both have pressed it, with a new seed and the two players swapping teams. The engine always has B serve first, so swapping teams is how the first serve alternates.
@@ -240,15 +240,13 @@ This is part of v1, not an extra: a phone that locks its screen drops the connec
 
 ## Client changes
 
-The main change is in `+page.svelte`, where the page currently calls `step` itself.
+Done:
 
-- Split out the transport: a `Driver` with the same moves the page makes now (`serve()`, `shot(s)`, `defence(d)`) and a way to listen for chains of states. `localDriver` wraps the current code (`step`, `withShot`, `withDefence`, `playsItself`) and records the calls. `socketDriver` sends messages and passes on the `states` it receives. `replayDriver` steps a stored game.
-- `play(first, attack)` currently builds the chain by stepping. Change it to `playChain(chain: Game[])` so it can take a chain from any driver; the `show` timing stays the same.
-- Online, `controlled` is set from the seat (`A` or `B`) and can't be changed. The debug drawer hides Play rally, Play game, Replay and seed in online games. It keeps the log and the dice.
-- `Controls` gets a `waiting` prop: after locking in, the buttons are disabled and the status line says "Waiting for Team B…". The serve button shows only for the serving team.
-- Team labels: show "You" or "Them" next to A and B in the top bar and the callouts, so a Team B player doesn't have to remember which they are.
-- Game over shows a "Watch replay" link once the game is saved.
-- Skipping with Space still only fast-forwards your own animation. Each client animates the chain at its own pace, so one player may be a beat ahead of the other. That's fine, because the server only accepts a call when the phase is `calls`.
+- `src/lib/ui/GameScreen.svelte`: the court, animation, controls and keys, moved out of the old page. It doesn't step the engine: whoever runs the game hands it chains of states (`playChain`, which queues a chain behind one still playing) or a state to jump to (`jumpTo`), and hears the player's moves through `onadvance`, `onshot` and `ondefence`.
+- `/computer`: the game against the computer on top of it, unchanged in play, with the debug drawer.
+- `/online`: `src/lib/online/connection.svelte.ts` keeps the socket and what the server has said; the page shows the menu, the waiting screen or the game. The step button says who's being waited on ("B2 to serve", "Locked in"), `TurnClock.svelte` shows both clocks once the court has caught up, a toast says when the computer called for someone, and game over offers *Rematch*.
+- Online, the top bar marks your team "you" and has a back link to the main screen.
+- Skipping with Space only fast-forwards your own animation. Each client animates at its own pace, so one player may be a beat ahead; the server only accepts a call when the phase is `calls`.
 
 ## Deploy
 
@@ -275,10 +273,10 @@ The cost of a single server is that any deploy, even a CSS change, restarts the 
 2. ~~`src/lib/server/room.ts` + tests (the rules and the clock, with no networking). Move the timing constants to `timing.ts`.~~ Done.
 3. ~~Switch to `adapter-node`. The store, migrations and the `/api/games` routes.~~ Done, tested against a real Postgres 16 as well as in memory.
 4. ~~`sockets.ts`, the Vite plugin, the production entry and the integration test.~~ Done.
-5. The driver split and `playChain` in the page, with single player checked to still work exactly as before. Upload games against the computer at game over.
-6. The lobby UI, `socketDriver`, waiting and serve states, the clocks, and You/Them labels.
+5. ~~The game screen split and `playChain`, with single player checked to still work as before.~~ Done. Still to do: upload games against the computer at game over.
+6. ~~The main screen, the lobby, waiting and serve states, the clocks, and "you" labels.~~ Done.
 7. The history and replay pages.
-8. Reconnecting in the browser: showing the snapshot after a reconnect. (The server side is done.)
+8. ~~Reconnecting in the browser.~~ Done: a reload or reconnect jumps back into the game.
 9. Reflector (or ESO) and the databases, then the `PG*` variables in both deployments. Deploy to `volley-dev` first, then `skaffold run`. (The Dockerfile and the rest of the deployment are done.)
 
 ## Open questions

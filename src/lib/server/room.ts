@@ -2,6 +2,10 @@ import { randomChoosers, type Choosers } from '../engine/choosers';
 import { newGame, other, step } from '../engine/rally';
 import { recordGame, type GameRecord, type RecordedCall } from '../engine/replay';
 import type { Channel, Game, Shot, Stance, TeamId } from '../engine/types';
+import type { Action, ClockView, FromClient, Presence, ToClient } from '../online/protocol';
+
+export type { Action, ClockView, FromClient, Presence, ToClient };
+import { CODE_LENGTH, CODE_LETTERS } from '../online/codes';
 import { playsItself } from '../ui/story';
 import { playbackMs } from '../ui/timing';
 
@@ -18,10 +22,6 @@ export const EMPTY_ROOM_MS = 30 * 60_000;
 /** A room where nothing has happened for this long is closed. */
 export const IDLE_ROOM_MS = 2 * 60 * 60_000;
 
-/** Consonants only, so codes can't spell words; no I or O to mix up with 1 and 0. */
-const CODE_LETTERS = 'BCDFGHJKLMNPQRSTVWXZ';
-const CODE_LENGTH = 4;
-
 const SHOTS: readonly Shot[] = ['line', 'cross', 'tip'];
 const CHANNELS: readonly Channel[] = ['line', 'cross'];
 const STANCES: readonly Stance[] = ['deep', 'short'];
@@ -30,8 +30,6 @@ export interface Seat {
 	playerId: string;
 	connected: boolean;
 }
-
-export type Action = 'serve' | 'call';
 
 export interface Clock {
 	action: Action;
@@ -57,36 +55,8 @@ export interface Room {
 	lastActive: number;
 }
 
-export type Presence = 'waiting' | 'connected' | 'away';
-
-export interface ClockView {
-	action: Action;
-	teams: TeamId[];
-	msLeft: number;
-	paused: boolean;
-}
-
 /** The game with the seed and RNG state blanked: either would let a player work out the dice to come. */
 export const redact = (g: Game): Game => ({ ...g, seed: 0, rngState: 0 });
-
-export type ToClient =
-	| { event: 'states'; chain: Game[] }
-	| {
-			event: 'snapshot';
-			code: string;
-			team: TeamId;
-			game: Game;
-			locked: TeamId[];
-			clock: ClockView | null;
-			opponent: Presence;
-			savedId: string | null;
-	  }
-	| { event: 'presence'; opponent: Presence }
-	| { event: 'locked'; team: TeamId }
-	| { event: 'clock'; clock: ClockView | null }
-	| { event: 'timedOut'; team: TeamId; action: Action }
-	| { event: 'rematchAsked'; team: TeamId }
-	| { event: 'saved'; id: string };
 
 export interface Send {
 	to: TeamId;
@@ -107,13 +77,6 @@ export interface Outcome {
 	save?: Save;
 }
 
-/** What a player sends. `at` is the step count of the state they're acting on, so a late action can't land on a later turn. */
-export type FromClient =
-	| { type: 'serve'; at: number }
-	| { type: 'shot'; at: number; shot: Shot }
-	| { type: 'defence'; at: number; block: Channel; stance: Stance }
-	| { type: 'rematch' };
-
 /** Seeds come from the OS's secure RNG: a guessable seed would give away every die. */
 export const newSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] >>> 1;
 
@@ -124,9 +87,6 @@ export function newCode(taken: (code: string) => boolean, random: () => number =
 		if (!taken(code)) return code;
 	}
 }
-
-/** Codes are typed by hand: accept lower case and stray spaces. */
-export const normaliseCode = (code: string) => code.replace(/\s/g, '').toUpperCase();
 
 export function createRoom(code: string, playerId: string, seed: number, now: number): Room {
 	return {

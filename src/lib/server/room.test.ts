@@ -16,7 +16,6 @@ import {
 	join,
 	leave,
 	newCode,
-	normaliseCode,
 	redact,
 	tick,
 	type Outcome,
@@ -24,6 +23,7 @@ import {
 	type Send,
 	type ToClient
 } from './room';
+import { isCode, normaliseCode } from '../online/codes';
 
 /** A room with both players in: A is p1, B is p2. The clock is on B's serve. */
 function seated(seed = 42): Room {
@@ -67,6 +67,8 @@ describe('rooms', () => {
 		const draws = [0, 0, 0, 0, 0.99, 0.99, 0.99, 0.99];
 		expect(newCode((c) => taken.has(c), () => draws.shift()!)).toBe('ZZZZ');
 		expect(normaliseCode(' kx qt ')).toBe('KXQT');
+		expect(isCode('KXQT')).toBe(true);
+		expect(['KXQ', 'KXQTT', 'KXQA', 'KX1T'].some(isCode)).toBe(false);
 	});
 
 	it('seats the creator as A and the joiner as B, and refuses a third player', () => {

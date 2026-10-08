@@ -1,26 +1,35 @@
 <script lang="ts">
 	import { config } from '#lib/engine/config.ts';
 	import { other } from '#lib/engine/rally.ts';
-	import type { Game } from '#lib/engine/types.ts';
+	import type { Game, TeamId } from '#lib/engine/types.ts';
 
 	let {
 		game,
-		debugOpen,
+		you = null,
+		debugOpen = false,
 		onhelp,
 		ondebug
-	}: { game: Game; debugOpen: boolean; onhelp: () => void; ondebug: () => void } = $props();
+	}: {
+		game: Game;
+		/** Online, the team this player has. */
+		you?: TeamId | null;
+		debugOpen?: boolean;
+		onhelp: () => void;
+		/** Shows the debug button; games against the computer only. */
+		ondebug?: () => void;
+	} = $props();
 </script>
 
 <header class="bar">
-	<span class="title">Volley</span>
+	<a class="title" href="/" title="Back to the main screen" aria-label="Back to the main screen">←<span class="word">Volley</span></a>
 	<div class="score" aria-live="polite">
-		<span class="a">A</span>
+		<span class="a">A{#if you === 'A'}<small>you</small>{/if}</span>
 		{#key game.score.A}<span class="num pop a">{game.score.A}</span>{/key}
 		<span class="serve" class:on={game.serving === 'A'} title="Serving"></span>
 		<span class="dash">–</span>
 		<span class="serve" class:on={game.serving === 'B'} title="Serving"></span>
 		{#key game.score.B}<span class="num pop b">{game.score.B}</span>{/key}
-		<span class="b">B</span>
+		<span class="b">B{#if you === 'B'}<small>you</small>{/if}</span>
 	</div>
 	<span class="meta">
 		{#if game.winner}
@@ -31,11 +40,13 @@
 	</span>
 	<div class="icons">
 		<button class="icon" onclick={onhelp} aria-label="Rules" title="Rules (?)">?</button>
-		<button class="icon" class:on={debugOpen} onclick={ondebug} aria-label="Debug panel" aria-pressed={debugOpen} title="Debug panel (D)">
-			<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-				<path d="M5 7l5 5l-5 5M12 19h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-			</svg>
-		</button>
+		{#if ondebug}
+			<button class="icon" class:on={debugOpen} onclick={ondebug} aria-label="Debug panel" aria-pressed={debugOpen} title="Debug panel (D)">
+				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+					<path d="M5 7l5 5l-5 5M12 19h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+				</svg>
+			</button>
+		{/if}
 	</div>
 </header>
 
@@ -53,6 +64,21 @@
 		grid-area: title;
 		font-weight: 700;
 		color: var(--muted);
+		text-decoration: none;
+	}
+	.title:hover {
+		color: var(--text);
+	}
+	.title .word {
+		margin-left: 0.3em;
+	}
+	/* "you" under your team's letter, online. */
+	.score small {
+		display: block;
+		font-size: 0.6rem;
+		font-weight: 600;
+		line-height: 1;
+		text-align: center;
 	}
 	.score {
 		grid-area: score;
@@ -122,12 +148,13 @@
 		font-weight: 700;
 		color: var(--muted);
 	}
-	/* One row on a phone: the rally count takes the title's place. */
+	/* One row on a phone: just the back arrow, then the rally count. */
 	@media (max-width: 600px) {
 		.bar {
-			grid-template-areas: 'meta score icons';
+			grid-template-columns: auto 1fr auto 1fr;
+			grid-template-areas: 'title meta score icons';
 		}
-		.title {
+		.title .word {
 			display: none;
 		}
 		.meta {
