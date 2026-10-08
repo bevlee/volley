@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { config } from '#lib/engine/config.ts';
 	import { other } from '#lib/engine/rally.ts';
 	import type { Game, TeamId } from '#lib/engine/types.ts';
 
@@ -41,13 +40,10 @@
 		{#key game.score.B}<span class="num pop b">{game.score.B}</span>{/key}
 		<span class="b">B{@render tag('B')}</span>
 	</div>
-	<span class="meta">
-		{#if game.winner}
-			<b>Team {game.winner} wins {game.score[game.winner]}–{game.score[other(game.winner)]}</b>
-		{:else}
-			Rally {game.rally} · to {config.targetScore}
-		{/if}
-	</span>
+	<!-- Only at game over: the score and serve dots say everything else. -->
+	{#if game.winner}
+		<span class="meta"><b>Team {game.winner} wins {game.score[game.winner]}–{game.score[other(game.winner)]}</b></span>
+	{/if}
 	<div class="icons">
 		{#if onleave}<button class="leave" onclick={onleave}>Leave</button>{/if}
 		<button class="icon" onclick={onhelp} aria-label="Rules" title="Rules (?)">?</button>
@@ -167,7 +163,7 @@
 		font-weight: 700;
 		color: var(--muted);
 	}
-	/* One row on a phone: just the back arrow, then the rally count. */
+	/* One row on a phone: just the back arrow (and the result at game over). */
 	@media (max-width: 600px) {
 		.bar {
 			grid-template-columns: auto 1fr auto 1fr;
