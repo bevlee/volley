@@ -24,7 +24,7 @@ Every finished game, online or against the computer, is saved to Postgres and ca
 
 `bevlee/onlyone` (branch `claude/charming-bohr-81568c`) already has a Socket.IO game server. Its rules have nothing in common with this game, so the code doesn't carry over as it is, but these parts do:
 
-- **Socket.IO instead of a bare `ws` server.** It brings reconnecting with backoff, heartbeats, rooms with broadcast, and acknowledgement callbacks for requests. It also has `connectionStateRecovery`, which replays the events a client missed during a short drop (up to 2 minutes by default). That deletes most of the reconnecting code this plan had. The cost is the client library in the bundle, on the order of 10–15 KB gzipped (an estimate).
+- **Socket.IO instead of a bare `ws` server.** It brings reconnecting with backoff, heartbeats, rooms with broadcast, and acknowledgement callbacks for requests. That deletes most of the reconnecting code this plan had. Its `connectionStateRecovery` (replaying events missed in a short drop) isn't used: the server sends a fresh snapshot on every reconnect instead, which is simpler and can't arrive out of order with the replayed events. The cost is the client library in the bundle, on the order of 10–15 KB gzipped (an estimate).
 - **Identity in the handshake.** onlyone sends `{ room, username }` in `socket.handshake.auth`. Here the client sends a random `playerId` it keeps in `localStorage`. The server seats players by that ID, so reconnecting is just connecting again: no `resume` message and no token.
 - **The timeout pattern.** onlyone's `difficultyPhase` waits for a choice or the time limit, then picks at random. The turn clock here does the same.
 
@@ -131,7 +131,7 @@ The debug drawer's Play rally / Play game buttons make every call by the compute
 
 When the engine or the balance changes, old games would replay into games that never happened, so they're deleted.
 
-What counts as a change is decided by a **rules fingerprint**, not the version number: play 50 fixed seeds to the end with `randomChoosers` and hash each game's score, step count and final RNG state. Any change that alters how a game plays out (a rule, a number in `config.ts`, the order dice are rolled) changes the fingerprint. Comments, refactors and log wording don't. Hashing the engine's source instead would also wipe every game on a comment edit. 50 full games take about 70 ms (measured), and the result is computed at build time and baked into the client and server.
+What counts as a change is decided by a **rules fingerprint**, not the version number: play 50 fixed seeds to the end with `randomChoosers` and hash each game's score, step count and final RNG state. Any change that alters how a game plays out (a rule, a number in `config.ts`, the order dice are rolled) changes the fingerprint. Comments, refactors and log wording don't. Hashing the engine's source instead would also wipe every game on a comment edit. 50 full games take about 70 ms (measured), computed once when the server starts (and in the browser before an upload).
 
 A rare branch that none of the 50 games reaches could change without moving the fingerprint. Then an old replay could go wrong instead of being deleted. Raising the seed count makes that less likely. Accepting it is cheaper than requiring a version bump for every rules change.
 
@@ -219,12 +219,12 @@ SvelteKit switches from `adapter-static` to `adapter-node`. The adapter builds a
 - `src/lib/engine/replay.ts`: recording, replaying and the rules fingerprint. Done.
 - `src/routes/api/games/+server.ts`: `POST` (upload a computer game) and `GET ?player=` (your history). `src/routes/api/games/[id]/+server.ts`: `GET` one.
 - `src/lib/server/room.ts` (done): pure room logic, with no sockets. `act`, `tick`, `join`, `connect`, `disconnect` and `leave` each change the room and return what to send to which team, plus a `save` at game over. All the turn rules live here, so they're unit tested. It's under `src/lib/server` so SvelteKit stops browser code from importing it, and it uses relative imports so tsx can run it.
-- `server/sockets.ts`: `attachSockets(httpServer, store)` creates the Socket.IO `Server` with `connectionStateRecovery` on. Socket.IO only takes requests under `/socket.io/`, so in dev it sits next to Vite's own hot-reload socket on the same server without clashing. It maps `playerId`s to seats, puts each room's sockets in a Socket.IO room for broadcasts, owns the one clock timer per room, and runs the cleanup.
-- `server/index.ts`: the production entry. A `node:http` server on 8080 that runs migrations, mounts `build/handler.js` and calls `attachSockets`.
+- `src/lib/server/sockets.ts` (done): `attachSockets(httpServer, { store })` creates the Socket.IO `Server`. Socket.IO only takes requests under `/socket.io/`, so in dev it sits next to Vite's own hot-reload socket on the same server without clashing. Each socket joins a Socket.IO room named after its `playerId`, so messages reach every tab a player has open and still find them after a rematch swaps teams. It owns the one clock timer per room, saves finished games, and closes expired rooms.
+- `server/index.ts` (done): the production entry. Connects the store (migrations, deleting games from older rules) before listening, then a `node:http` server on 8080 mounts `build/handler.js` and calls `attachSockets`. SIGTERM closes it cleanly.
 - Room codes: 4 letters from `BCDFGHJKLMNPQRSTVWXZ`, checked for clashes. That's consonants only, so codes can't spell words, and leaving out I and O avoids mixing them up with 1 and 0. 20 letters give 20⁴ = 160k codes, which is enough for a handful of rooms at once.
 - Seeds come from `crypto.getRandomValues` (Web Crypto, so no Node types are needed).
 - Rooms are deleted after 30 minutes with nobody connected, or 2 hours without a move.
-- Run with `tsx server/index.ts`. The engine imports files without extensions (`'./rules'`), which Node's own loader won't resolve, so the socket side needs tsx.
+- Run with `node --import tsx server/index.ts` (`npm start`). The engine imports files without extensions (`'./rules'`), which Node's own loader won't resolve, so the socket side needs tsx.
 
 The SvelteKit routes are bundled by Vite and the socket server runs under tsx, so the store module loads twice in production, giving two pools of 5 connections. That's fine at this size, and simpler than sharing one between them.
 
@@ -233,11 +233,10 @@ The SvelteKit routes are bundled by Vite and the socket server runs under tsx, s
 This is part of v1, not an extra: a phone that locks its screen drops the connection. Most of it comes with Socket.IO:
 
 - The client reconnects by itself, with backoff.
-- After a drop of under 2 minutes, `connectionStateRecovery` replays the events missed in between, so a chain of states isn't lost partway through.
-- After a longer drop, the server finds the seat by `playerId` and sends a `snapshot`.
+- On reconnecting, the server finds the seat by `playerId` and sends a `snapshot`. Moves made while you were away aren't animated; the court jumps to where the game is.
 - Either way, the opponent gets `presence: 'connected'`. A seat stays held while its player is away, until the room expires.
 
-`playerId` is kept in `localStorage`, so it works across tabs and a browser restart. Opening the same room in two tabs makes the newer tab take the seat; the older one is told and stops sending.
+`playerId` is kept in `localStorage`, so it works across tabs and a browser restart. Two tabs open on the same game both get every message and either can play.
 
 ## Client changes
 
@@ -255,9 +254,9 @@ The main change is in `+page.svelte`, where the page currently calls `step` itse
 
 There's still one image, one Deployment and one Service, and the Ingress doesn't change. Traefik passes WebSocket upgrades through without extra config. With one replica, Socket.IO's long-polling fallback needs no sticky sessions.
 
-- `Dockerfile`: the build stage stays as it is. The serve stage changes from `nginx-unprivileged` to `node:26-bookworm-slim` with production dependencies plus tsx, `build/`, `server/` and `src/lib/engine/`, `USER node` and `CMD tsx server/index.ts` on port 8080. `nginx.conf` is deleted.
-- `k8s/deployment.yaml`: `PGHOST`, `PGDATABASE` as plain values and `PGUSER`, `PGPASSWORD` from the mirrored Secret. `runAsUser` changes from 101 (nginx) to 1000 (node). Raise the memory limit from 64Mi to 128Mi: Node with tsx idles around 50–70 MB (an estimate, not measured), where nginx used a few. Keep `replicas: 1`, because rooms are in memory. The read-only root and the `/tmp` volume still work. Add a `/healthz` route for the probes that doesn't touch the database, so a database outage doesn't restart the pod. Saving fails and logs instead.
-- Dev, both `npm run dev` and `skaffold dev`: a small Vite plugin in `vite.config.ts` calls `attachSockets(server.httpServer, store)` from `configureServer`, so Socket.IO works on the dev server itself. `k8s-dev` gets the same variables with `PGDATABASE=volley_dev`. Locally, leave them unset for the in-memory store, or `kubectl port-forward -n db svc/<service> 5432` and point at a local dev database. Changes to the server code need a dev server restart; Vite won't hot-reload them.
+- `Dockerfile` (done): the build stage also prunes dev dependencies. The serve stage changes from `nginx-unprivileged` to `node:26-bookworm-slim` with production dependencies (tsx among them), `build/`, `server/` and `src/lib/`, `USER node` and `node --import tsx server/index.ts` on port 8080. `nginx.conf` is deleted. Tested with Docker under the pod's restrictions (read-only root, writable `/tmp`, uid 1000, no capabilities): a full online game plays and it stops cleanly. The image is 377 MB.
+- `k8s/deployment.yaml` (done, except the database): `runAsUser` changes from 101 (nginx) to 1000 (node). Memory: request 96Mi, limit 256Mi. Measured in the container, it uses about 80 MiB after a game; nginx used a few. `ORIGIN`, plus `ADDRESS_HEADER=X-Forwarded-For` and `XFF_DEPTH=1` so the upload rate limit sees the client's address, not Traefik's. When the database is ready: `PGHOST`, `PGDATABASE` as plain values and `PGUSER`, `PGPASSWORD` from the mirrored Secret. Keep `replicas: 1`, because rooms are in memory. The read-only root and the `/tmp` volume still work. Add a `/healthz` route for the probes that doesn't touch the database, so a database outage doesn't restart the pod. Saving fails and logs instead.
+- Dev, both `npm run dev` and `skaffold dev` (done): a small Vite plugin in `vite.config.ts` loads the socket code through Vite's SSR loader once the dev server is listening, so Socket.IO works on the dev server itself and shares the game store with the API routes. `k8s-dev` gets the same variables with `PGDATABASE=volley_dev`. Locally, leave them unset for the in-memory store, or `kubectl port-forward -n db svc/<service> 5432` and point at a local dev database. Changes to the server code need a dev server restart; Vite won't hot-reload them.
 
 The cost of a single server is that any deploy, even a CSS change, restarts the process and ends games in progress. You deploy by hand from tags, so check nobody's playing first.
 
@@ -274,13 +273,13 @@ The cost of a single server is that any deploy, even a CSS change, restarts the 
 
 1. ~~`src/lib/engine/replay.ts` and its tests, plus the rules fingerprint.~~ Done. That's the riskiest part, and it needs no server.
 2. ~~`src/lib/server/room.ts` + tests (the rules and the clock, with no networking). Move the timing constants to `timing.ts`.~~ Done.
-3. Switch to `adapter-node`. The store, migrations and the `/api/games` routes, against the in-memory store first.
-4. `server/sockets.ts`, the Vite plugin, and the integration test.
+3. ~~Switch to `adapter-node`. The store, migrations and the `/api/games` routes.~~ Done, tested against a real Postgres 16 as well as in memory.
+4. ~~`sockets.ts`, the Vite plugin, the production entry and the integration test.~~ Done.
 5. The driver split and `playChain` in the page, with single player checked to still work exactly as before. Upload games against the computer at game over.
 6. The lobby UI, `socketDriver`, waiting and serve states, the clocks, and You/Them labels.
 7. The history and replay pages.
-8. Reconnecting: the `playerId` seat lookup, snapshots and the second-tab case.
-9. Reflector (or ESO) and the databases, `server/index.ts`, the Dockerfile and deployment changes. Deploy to `volley-dev` first, then `skaffold run`.
+8. Reconnecting in the browser: showing the snapshot after a reconnect. (The server side is done.)
+9. Reflector (or ESO) and the databases, then the `PG*` variables in both deployments. Deploy to `volley-dev` first, then `skaffold run`. (The Dockerfile and the rest of the deployment are done.)
 
 ## Open questions
 

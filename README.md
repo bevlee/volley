@@ -13,6 +13,15 @@ npm run dev
 
 Then open http://localhost:5173 and press Space to play. When it's your call, pick a shot (or a block and dig) and press Space to roll the attack.
 
+Online play runs on the same dev server. Without `PGHOST` set, saved games are kept in memory until it restarts. To run the production build locally:
+
+```sh
+npm run build
+npm start          # http://localhost:8080
+```
+
+With a database, set `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `PGPASSWORD`. The server creates its tables on start. To also run the database tests, set the same variables with a `TEST_` prefix (e.g. `TEST_PGHOST`) and point them at a throwaway database: the tests drop its tables.
+
 ## Deploy
 
 Live at https://volley.bevsoft.com. Tag the commit and deploy from your machine with Skaffold:

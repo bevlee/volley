@@ -7,13 +7,22 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 
 # --- serve stage ---
-# nginx-unprivileged runs as uid 101 on port 8080 and keeps its pid and temp
-# files under /tmp, which lets the pod run with a read-only root.
-FROM docker.io/nginxinc/nginx-unprivileged:1.29-alpine
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/build /usr/share/nginx/html
+# One Node process: SvelteKit's pages, API and static files, plus the game's sockets (server/index.ts).
+# tsx runs the server's TypeScript directly; the engine's extensionless imports need it.
+FROM docker.io/node:26-bookworm-slim
+WORKDIR /app
+ENV NODE_ENV=production PORT=8080
 
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/build ./build
+COPY --from=builder /app/server ./server
+COPY --from=builder /app/src/lib ./src/lib
+
+# The image's unprivileged user (uid 1000).
+USER node
 EXPOSE 8080
+CMD ["node", "--import", "tsx", "server/index.ts"]

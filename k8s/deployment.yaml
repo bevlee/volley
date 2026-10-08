@@ -19,8 +19,8 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        runAsUser: 101
-        runAsGroup: 101
+        runAsUser: 1000
+        runAsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -32,33 +32,45 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+          env:
+            - name: ORIGIN
+              value: https://volley.bevsoft.com
+            # The client's address for the upload rate limit: the last hop Traefik adds.
+            - name: ADDRESS_HEADER
+              value: X-Forwarded-For
+            - name: XFF_DEPTH
+              value: "1"
+            # No PGHOST: games are kept in memory until the database is set up. Then add PGHOST
+            # (<service>.db.svc.cluster.local), PGDATABASE (volley), and PGUSER / PGPASSWORD from
+            # the Secret mirrored into this namespace.
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+          # Measured in the container: about 80 MiB after a game (Node plus tsx).
           resources:
             requests:
-              cpu: 10m
-              memory: 16Mi
+              cpu: 20m
+              memory: 96Mi
             limits:
-              cpu: 200m
-              memory: 64Mi
+              cpu: 500m
+              memory: 256Mi
           readinessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
             periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
             periodSeconds: 15
             failureThreshold: 3
           volumeMounts:
-            # Writable scratch space under a read-only root (nginx pid/temp files).
+            # Writable scratch space under a read-only root (tsx's compile cache).
             - name: tmp
               mountPath: /tmp
       volumes:

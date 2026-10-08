@@ -1,6 +1,26 @@
 import { defineConfig } from 'vitest/config';
-import adapter from '@sveltejs/adapter-static';
+import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
+import type { Plugin } from 'vite';
+
+/**
+ * Online play on the dev server: Socket.IO sits next to Vite's own hot-reload socket. The socket code
+ * loads through Vite's SSR loader, so it shares modules (and the game store) with the API routes.
+ * Changes to it need a dev server restart. Production runs server/index.ts instead.
+ */
+const sockets = (): Plugin => ({
+	name: 'volley-sockets',
+	configureServer(server) {
+		const http = server.httpServer;
+		if (!http) return; // Vitest runs Vite without an HTTP server.
+		http.once('listening', async () => {
+			const { attachSockets } = await server.ssrLoadModule('/src/lib/server/sockets.ts');
+			const { getStore } = await server.ssrLoadModule('/src/lib/server/store.ts');
+			const { FINGERPRINT } = await server.ssrLoadModule('/src/lib/server/build.ts');
+			attachSockets(http, { store: () => getStore(FINGERPRINT) });
+		});
+	}
+});
 
 export default defineConfig({
 	plugins: [
@@ -11,10 +31,11 @@ export default defineConfig({
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
 
-			// A static build served by nginx (see Dockerfile). The game renders only in the browser
-			// (ssr = false), so every route falls back to index.html.
-			adapter: adapter({ fallback: 'index.html' })
-		})
+			// A Node build: server/index.ts mounts its handler next to the game's sockets. Pages still
+			// render only in the browser (ssr = false); the server adds the /api routes.
+			adapter: adapter({ precompress: true })
+		}),
+		sockets()
 	],
 	test: {
 		expect: { requireAssertions: true },
