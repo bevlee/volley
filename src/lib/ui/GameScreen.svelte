@@ -37,8 +37,7 @@
 		debugOpen = false,
 		ondebug,
 		banner,
-		dock,
-		extraHeight = 0
+		dock
 	}: {
 		initial: Game;
 		/** The team the player calls for; null to just watch. */
@@ -72,9 +71,11 @@
 		banner?: Snippet;
 		/** Between the court and the controls. */
 		dock?: Snippet;
-		/** Pixels the banner and dock take, so the court shrinks to keep the controls on screen. */
-		extraHeight?: number;
 	} = $props();
+
+	/** The banner's and dock's heights, measured, so the court shrinks to keep the controls on screen. */
+	let bannerH = $state(0);
+	let dockH = $state(0);
 
 	/** The latest state: what play has reached. `initial` only sets where it starts. */
 	const start = untrack(() => initial);
@@ -259,9 +260,10 @@
 <svelte:window {onkeydown} />
 
 <!-- --chrome-h is roughly the top bar plus the dock (and the scoreline when narrow), so the court fills the rest of the screen. -->
-<main style:--extra-h="{extraHeight}px">
+<!-- With a banner and clocks (online), the court may shrink as far as it does on a phone, so the controls still fit a laptop screen. -->
+<main style:--extra-h="{bannerH + dockH}px" style:--court-min={bannerH + dockH ? '200px' : undefined}>
 	<TopBar game={view} {you} {names} {debugOpen} onhelp={() => rules.toggle()} {ondebug} />
-	{@render banner?.()}
+	{#if banner}<div bind:clientHeight={bannerH}>{@render banner()}</div>{/if}
 	<div class="play">
 		<div class="side"><ScorePanel {sheet} /></div>
 		<div class="centre">
@@ -275,7 +277,7 @@
 				onpreview={(s) => (preview = s)}
 			/>
 			<ScoreLine {sheet} bind:this={scoreLine} />
-			{@render dock?.()}
+			{#if dock}<div bind:clientHeight={dockH}>{@render dock()}</div>{/if}
 			<Controls
 				status={status ?? statusLine(view, controlled)}
 				{choosing}

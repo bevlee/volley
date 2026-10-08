@@ -45,19 +45,22 @@
 {/if}
 
 <style>
+	/* Side by side, so two clocks take one row's height. */
 	.clocks {
 		display: flex;
-		flex-direction: column;
-		gap: 4px;
+		gap: 16px;
 		padding-top: 6px;
 	}
 	.clock {
+		flex: 1;
+		min-width: 0;
 		display: grid;
-		grid-template-columns: 6.5rem 1fr 3.5rem;
+		grid-template-columns: auto 1fr 2.2rem;
 		align-items: center;
 		gap: 8px;
 		font-size: 0.8rem;
 		color: var(--muted);
+		white-space: nowrap;
 	}
 	.clock.mine {
 		color: var(--text);
