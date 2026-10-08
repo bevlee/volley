@@ -66,14 +66,15 @@ Server → client:
 
 ## Server
 
-New `server/` folder, about 250 lines:
+One Node process serves both the built site and the WebSocket at `/ws`, replacing nginx. New `server/` folder, about 300 lines:
 
 - `server/room.ts`: pure room logic, with no sockets. `Room { code, game, seats: {A, B}, pending: {shot?, defence?}, rematch: Set<TeamId>, lastActive }`, plus `handle(room, team, msg) → { send: [...], broadcast: [...] }`. All the turn rules live here, so they can be unit tested.
-- `server/index.ts`: a `ws` server on port 8787 that only does the networking. It maps sockets to seats, sends a ping every 20 s and drops sockets that don't answer, and runs the cleanup.
+- `server/sockets.ts`: `attachSockets(httpServer)`. It handles `upgrade` requests for `/ws` only and leaves every other upgrade alone (in dev, Vite's hot reload has its own socket on the same server). It maps sockets to seats, sends a ping every 20 s and drops sockets that don't answer, and runs the cleanup. The dev server and the production server both call it.
+- `server/index.ts`: the production entry. A `node:http` server on 8080 serves `build/` with `sirv` and calls `attachSockets`. It sets the same cache headers nginx does now: `_app/immutable/*` cached for a year, everything else `no-cache`, and `index.html` for any unknown path. Turning on `precompress` in `adapter-static` makes the build write `.gz` and `.br` files, which sirv serves, so gzip isn't lost.
 - Room codes: 4 letters from `BCDFGHJKLMNPQRSTVWXZ`, checked for clashes. That's consonants only, so codes can't spell words, and leaving out I and O avoids mixing them up with 1 and 0. 20 letters give 20⁴ = 160k codes, which is enough for a handful of rooms at once. Guessing someone's code only gets you into a room with a free seat, so there's no rate limit for v1.
 - Seeds come from `crypto.randomInt`.
 - Rooms are deleted after 30 minutes with nobody connected, or 2 hours without a move.
-- Run with `tsx server/index.ts`. It doesn't need a build step for something this small. Add a `ws` dependency and an `npm run server` script.
+- Run with `tsx server/index.ts`. Node 26 can strip types on its own, but the engine imports files without extensions (`'./rules'`), which Node's ESM loader won't resolve, so tsx it is. Add `ws` and `sirv` as dependencies and an `npm start` script.
 
 ### Reconnecting
 
@@ -92,25 +93,28 @@ The main change is in `+page.svelte`, where the page currently calls `step` itse
 
 ## Deploy
 
-- `Dockerfile.server`: `node:26-bookworm-slim`, `npm ci --omit=dev` plus tsx, `CMD tsx server/index.ts`. It's a separate image from the nginx one.
-- k8s: a `volley-ws` Deployment (with `replicas: 1`, because rooms are in memory) and Service, plus a `/ws` path in the existing Ingress that points at it. Traefik passes WebSocket upgrades through without extra config. Same for `k8s-dev`.
-- Skaffold: add the second artifact.
-- Local dev: `vite.config.ts` proxies `server.proxy['/ws'] = { target: 'ws://localhost:8787', ws: true }`, so the client always connects to `/ws` on its own origin. Run `npm run server` next to `npm run dev`.
+There's still one image, one Deployment and one Service, and the Ingress doesn't change. Traefik passes WebSocket upgrades through without extra config.
+
+- `Dockerfile`: the build stage stays as it is. The serve stage changes from `nginx-unprivileged` to `node:26-bookworm-slim` with production dependencies plus tsx, the `build/`, `server/` and `src/lib/engine/` folders, `USER node` and `CMD tsx server/index.ts` on port 8080. `nginx.conf` is deleted.
+- `k8s/deployment.yaml`: `runAsUser` changes from 101 (nginx) to 1000 (node). Raise the memory limit from 64Mi to 128Mi: Node with tsx idles around 50–70 MB, where nginx used a few. Keep `replicas: 1`, because rooms are in memory. The read-only root and the `/tmp` volume still work. The probes stay on `/`.
+- Dev, both `npm run dev` and `skaffold dev`: a small Vite plugin in `vite.config.ts` calls `attachSockets(server.httpServer)` from `configureServer`. `/ws` then works on the dev server itself, with no second process, no proxy, and no changes to `Dockerfile.dev` or `k8s-dev`. Changes to the server code need a dev server restart; Vite won't hot-reload them.
+
+The cost of a single server is that any deploy, even a CSS change, restarts the process and ends games in progress. Separate services would let front-end deploys leave games alone. You deploy by hand from tags, so check nobody's playing first.
 
 ## Testing
 
 - `server/room.test.ts` (Vitest, no sockets) with a fixed seed: create and join, the third person is refused, a call out of turn or from the wrong team is ignored, a lone call gets only `locked` to the opponent (never the call's contents), both calls give the same chain as `step(step(g, fixedChoosers(calls)))` plus the auto phases, `rngState` and `seed` are never in anything sent, resume gives the seat back, rematch needs both.
-- One integration test: start the server on port 0, connect two `ws` clients and play a rally.
+- One integration test: start an `http` server on port 0 with `attachSockets`, connect two `ws` clients and play a rally. Check that a request for `/` still gets `index.html` and that an upgrade on another path isn't taken.
 - By hand: two browser windows locally, then a phone on mobile data against the dev deploy, locking the screen partway through a rally.
 
 ## Build order
 
 1. `server/room.ts` + tests (the rules, with no networking).
-2. `server/index.ts`, the Vite proxy, and the integration test.
+2. `server/sockets.ts`, the Vite plugin, and the integration test.
 3. The driver split and `playChain` in the page, with single player checked to still work exactly as before.
 4. The lobby UI, `socketDriver`, waiting and serve states, and You/Them labels.
 5. Reconnecting.
-6. Dockerfile, k8s and Skaffold, then deploy to `volley-dev`.
+6. `server/index.ts` (static files and cache headers), the Dockerfile and deployment changes, then deploy with `skaffold run` and check caching and `/ws` on the real domain.
 
 ## Open questions
 
