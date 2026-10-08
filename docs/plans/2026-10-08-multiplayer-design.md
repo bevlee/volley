@@ -97,7 +97,13 @@ Server → client:
 
 ### What's stored
 
-The engine is deterministic, so a game is just its **seed plus the list of calls**, in order. Replaying is: `newGame(seed)`, then step through, giving each `calls` step its recorded calls. That's a few KB per game. The browser already has the engine and the animation, so the server only stores and serves the record. The replay page rebuilds the states locally and plays them with the same `playChain` the live game uses.
+The engine is deterministic, so a game is just its **seed plus the list of calls**, in order. Replaying is: `newGame(seed)`, then step through, giving each `calls` step its recorded calls. That's a few KB per game. The browser already has the engine and the animation, so the server only stores and serves the record.
+
+Built and tested in `src/lib/engine/replay.ts`:
+
+- `recordGame(game, byComputer)` reads the calls from the game's log; the caller only tracks who made each one.
+- `replayGame(record)` gives the final state, about 1 ms a game. It's what checks an uploaded record.
+- `replaySteps(record)` steps through every state for watching. Each `step` copies the whole game, so stepping through a full game costs about 115 ms and producing every state up front would add up to about 6 MB. The replay page therefore takes states one beat at a time, as the animation needs them.
 
 Each call is recorded with who made it:
 
@@ -111,7 +117,7 @@ type RecordedCall = { shot: Shot; block: Channel; stance: Stance; byComputer: { 
 
 The recorded computer values are still stored. Replay checks them against what it gets, and a mismatch means the record was tampered with. Calls the clock made in online games are recorded the same way, as computer calls.
 
-The browser runs these games, so it uploads the record at game over: `POST /api/games { seed, calls, fingerprint }`. The server doesn't trust the upload. It replays it with its own engine, refuses it if the computer's recorded calls don't match or the game doesn't end, and stores its **own** final score and log. A game can be faked only by playing it, and against the computer that hurts nobody. The body is capped at 64 KB and there's a per-IP rate limit (a few uploads a minute), because the endpoint is open.
+The browser runs these games, so it uploads the record at game over: `POST /api/games { seed, calls, fingerprint, playerId }`. The server doesn't trust the upload. It replays it with its own engine, refuses it if the computer's recorded calls don't match or the game doesn't end, and stores its **own** final score. A game can be faked only by playing it, and against the computer that hurts nobody. The body is capped at 64 KB and there's a per-IP rate limit (a few uploads a minute), because the endpoint is open.
 
 The debug drawer's Play rally / Play game buttons make every call by the computer, so they record the same way. Changing "You play" mid-game is fine too, because each call records who made it.
 
@@ -119,7 +125,7 @@ The debug drawer's Play rally / Play game buttons make every call by the compute
 
 When the engine or the balance changes, old games would replay into games that never happened, so they're deleted.
 
-What counts as a change is decided by a **rules fingerprint**, not the version number: play 50 fixed seeds to the end with `randomChoosers` and hash each game's score, step count and final RNG state. Any change that alters how a game plays out (a rule, a number in `config.ts`, the order dice are rolled) changes the fingerprint. Comments, refactors and log wording don't. Hashing the engine's source instead would also wipe every game on a comment edit. 50 full games take on the order of 100 ms (an estimate), and the result is computed at build time and baked into the client and server.
+What counts as a change is decided by a **rules fingerprint**, not the version number: play 50 fixed seeds to the end with `randomChoosers` and hash each game's score, step count and final RNG state. Any change that alters how a game plays out (a rule, a number in `config.ts`, the order dice are rolled) changes the fingerprint. Comments, refactors and log wording don't. Hashing the engine's source instead would also wipe every game on a comment edit. 50 full games take about 70 ms (measured), and the result is computed at build time and baked into the client and server.
 
 A rare branch that none of the 50 games reaches could change without moving the fingerprint. Then an old replay could go wrong instead of being deleted. Raising the seed count makes that less likely. Accepting it is cheaper than requiring a version bump for every rules change.
 
@@ -130,10 +136,15 @@ A rare branch that none of the 50 games reaches could change without moving the 
 
 The version from `package.json` is still stored, for display only.
 
-### Pages
+### Your history
 
-- `/replays`: recent games, newest first, 50 a page: date, mode (online / computer), final score, version. Games you played in this browser are marked (their ids are kept in `localStorage`); there are no accounts.
-- `/replay/<id>`: the court, with play/pause, step (Space) and next rally. Ids are random 10-character strings, so a link can be shared but not guessed. The list is public, but there's nothing personal in a game.
+There are no accounts. The same random `playerId` in `localStorage` that seats you in online rooms also marks your games: online games store both players' IDs, and games against the computer store yours.
+
+- `/history`: your games, newest first, 50 a page: date, mode (online / computer), opponent, final score. It asks for `GET /api/games?player=<playerId>`.
+- `/replay/<id>`: the court, with play/pause, step (Space) and next rally. Game IDs are random 10-character strings.
+- **History isn't shared with anyone yet.** Two things keep it that way. There's no list of everyone's games. API responses never include a `playerId`, so seeing a game doesn't give you the means to read someone else's history.
+- Sharing later is easy: the replay links already work for whoever has one, so sharing a game is just sending its link.
+- **Your `playerId` works like a password**: anyone who has it can read your history. Clearing site data, or using another browser or device, starts a new, empty history. Moving it between devices needs a "link this device" code or accounts, which aren't in v1.
 
 ## Storage
 
@@ -146,13 +157,16 @@ create table games (
   version     text not null,              -- '1.2.3', for display
   fingerprint text not null,              -- rules fingerprint; other values are deleted at startup
   seed        bigint not null,
+  player_a    text,                       -- playerId, null for the computer
+  player_b    text,
   calls       jsonb not null,             -- RecordedCall[]
   score_a     int not null,
   score_b     int not null,
   winner      text not null,
   created_at  timestamptz not null default now()
 );
-create index games_recent on games (fingerprint, created_at desc);
+create index games_player_a on games (player_a, created_at desc);
+create index games_player_b on games (player_b, created_at desc);
 ```
 
 - Client: [`postgres`](https://github.com/porsager/postgres) (small, no native build), pool of 5.
@@ -196,8 +210,8 @@ If the `db` namespace has NetworkPolicies, they need to let `volley` and `volley
 SvelteKit switches from `adapter-static` to `adapter-node`. The adapter builds a `handler(req, res, next)` that serves the pages, the `/api` routes and the static files. It already caches `_app/immutable/*` for a year and sets `precompress` for gzip and brotli, so it covers what `nginx.conf` does now. The game and replay pages keep `ssr = false`. SvelteKit 3.0.1 has no WebSocket support (checked in its source), so Socket.IO is attached in a small server of our own.
 
 - `src/lib/server/store.ts`: the `GameStore` interface (`save`, `get`, `recent`) with Postgres and in-memory versions.
-- `src/lib/replay.ts`: `record` and `replay`, shared by the browser, the upload check and the online rooms.
-- `src/routes/api/games/+server.ts`: `POST` (upload a computer game) and `GET` (recent). `src/routes/api/games/[id]/+server.ts`: `GET` one.
+- `src/lib/engine/replay.ts`: recording, replaying and the rules fingerprint. Done.
+- `src/routes/api/games/+server.ts`: `POST` (upload a computer game) and `GET ?player=` (your history). `src/routes/api/games/[id]/+server.ts`: `GET` one.
 - `server/room.ts`: pure room logic, with no sockets. `Room { code, game, seats: {A, B}, pending: {shot?, defence?}, calls: RecordedCall[], rematch: Set<TeamId>, lastActive }`, plus `handle(room, team, msg) → { send, broadcast, save? }`. All the turn rules live here, so they can be unit tested.
 - `server/sockets.ts`: `attachSockets(httpServer, store)` creates the Socket.IO `Server` with `connectionStateRecovery` on. Socket.IO only takes requests under `/socket.io/`, so in dev it sits next to Vite's own hot-reload socket on the same server without clashing. It maps `playerId`s to seats, puts each room's sockets in a Socket.IO room for broadcasts, owns the one clock timer per room, and runs the cleanup.
 - `server/index.ts`: the production entry. A `node:http` server on 8080 that runs migrations, mounts `build/handler.js` and calls `attachSockets`.
@@ -235,7 +249,7 @@ The main change is in `+page.svelte`, where the page currently calls `step` itse
 
 There's still one image, one Deployment and one Service, and the Ingress doesn't change. Traefik passes WebSocket upgrades through without extra config. With one replica, Socket.IO's long-polling fallback needs no sticky sessions.
 
-- `Dockerfile`: the build stage stays as it is. The serve stage changes from `nginx-unprivileged` to `node:26-bookworm-slim` with production dependencies plus tsx, `build/`, `server/`, `src/lib/engine/` and `src/lib/replay.ts`, `USER node` and `CMD tsx server/index.ts` on port 8080. `nginx.conf` is deleted.
+- `Dockerfile`: the build stage stays as it is. The serve stage changes from `nginx-unprivileged` to `node:26-bookworm-slim` with production dependencies plus tsx, `build/`, `server/` and `src/lib/engine/`, `USER node` and `CMD tsx server/index.ts` on port 8080. `nginx.conf` is deleted.
 - `k8s/deployment.yaml`: `PGHOST`, `PGDATABASE` as plain values and `PGUSER`, `PGPASSWORD` from the mirrored Secret. `runAsUser` changes from 101 (nginx) to 1000 (node). Raise the memory limit from 64Mi to 128Mi: Node with tsx idles around 50–70 MB (an estimate, not measured), where nginx used a few. Keep `replicas: 1`, because rooms are in memory. The read-only root and the `/tmp` volume still work. Add a `/healthz` route for the probes that doesn't touch the database, so a database outage doesn't restart the pod. Saving fails and logs instead.
 - Dev, both `npm run dev` and `skaffold dev`: a small Vite plugin in `vite.config.ts` calls `attachSockets(server.httpServer, store)` from `configureServer`, so Socket.IO works on the dev server itself. `k8s-dev` gets the same variables with `PGDATABASE=volley_dev`. Locally, leave them unset for the in-memory store, or `kubectl port-forward -n db svc/<service> 5432` and point at a local dev database. Changes to the server code need a dev server restart; Vite won't hot-reload them.
 
@@ -243,7 +257,7 @@ The cost of a single server is that any deploy, even a CSS change, restarts the 
 
 ## Testing
 
-- `src/lib/replay.test.ts`: for 200 seeds, play a game where each call is randomly made by the player or the computer, record it, replay it, and check the final state matches exactly. Also check that a tampered computer call is caught, and that the fingerprint is stable across runs and changes when a number in `config.ts` changes.
+- `src/lib/engine/replay.test.ts` (done): for 200 seeds, play a game where each call is randomly made by the player or the computer, record it, replay it, and check the final state matches exactly. Also check that a tampered computer call is caught, and that the fingerprint is stable across runs and changes when a number in `config.ts` changes.
 - `server/room.test.ts` (Vitest, no sockets) with a fixed seed: create and join, the third person is refused, a call out of turn or from the wrong team is ignored, a lone call gets only `locked` to the opponent (never the call's contents), both calls give the same chain as `step` with those calls plus the auto phases, `rngState` and `seed` are never in anything sent, connecting again with the same `playerId` gives the seat back, rematch needs both, and game over saves a record that replays to the same game. Clock: it starts after the chain's playback time, a timed-out call is made by the computer and replays exactly, a late call after a timeout is ignored, a lone lock-in stops only that side's clock, and the clocks stop with both players away.
 - Upload route: a valid record is stored with the server's own score, and a game that doesn't finish, a bad computer call, an oversized body or an old fingerprint are refused.
 - One integration test: start an `http` server on port 0 with `attachSockets` and the in-memory store, connect two `socket.io-client` clients and play a rally. Drop one mid-rally and check it gets the missed chain (short drop) or a snapshot (long drop).
@@ -252,13 +266,13 @@ The cost of a single server is that any deploy, even a CSS change, restarts the 
 
 ## Build order
 
-1. `src/lib/replay.ts` and its tests, plus the rules fingerprint. That's the riskiest part, and it needs no server.
+1. ~~`src/lib/engine/replay.ts` and its tests, plus the rules fingerprint.~~ Done. That's the riskiest part, and it needs no server.
 2. `server/room.ts` + tests (the rules and the clock, with no networking). Move the timing constants to `timing.ts`.
 3. Switch to `adapter-node`. The store, migrations and the `/api/games` routes, against the in-memory store first.
 4. `server/sockets.ts`, the Vite plugin, and the integration test.
 5. The driver split and `playChain` in the page, with single player checked to still work exactly as before. Upload games against the computer at game over.
 6. The lobby UI, `socketDriver`, waiting and serve states, the clocks, and You/Them labels.
-7. The replay pages.
+7. The history and replay pages.
 8. Reconnecting: the `playerId` seat lookup, snapshots and the second-tab case.
 9. Reflector (or ESO) and the databases, `server/index.ts`, the Dockerfile and deployment changes. Deploy to `volley-dev` first, then `skaffold run`.
 
