@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NUMBERED } from './lineup';
 import { fixedChoosers, withDefence, withShot } from './choosers';
 import { config } from './config';
 import { newGame, playGame, playRally, step } from './rally';
@@ -10,7 +11,7 @@ import type { Calls, Game } from './types';
  * B has already served (no dice), so the next step is A's pass.
  */
 function evenGame(): Game {
-	const g = newGame(1);
+	const g = newGame(1, NUMBERED);
 	for (const team of [g.teams.A, g.teams.B]) {
 		for (const p of [team.blocker, team.defender]) {
 			p.attack = 4;
@@ -33,7 +34,7 @@ const lineIntoBlock: Calls = { shot: 'line', block: 'line', stance: 'deep' };
 
 describe('rally', () => {
 	it('starts with B2 holding the serve, then serving it to A without rolling', () => {
-		const g = newGame(5);
+		const g = newGame(5, NUMBERED);
 		expect(g.phase).toEqual({ kind: 'serve', team: 'B' });
 		expect(g.serving).toBe('B');
 		const served = step(g);
@@ -178,7 +179,7 @@ describe('rally', () => {
 
 describe('whole games', () => {
 	it('replays exactly from the same seed', () => {
-		expect(playGame(newGame(42)).log).toEqual(playGame(newGame(42)).log);
+		expect(playGame(newGame(42, NUMBERED)).log).toEqual(playGame(newGame(42, NUMBERED)).log);
 	});
 
 	it('finishes 200 random games with valid scores', () => {
@@ -196,7 +197,7 @@ describe('whole games', () => {
 
 describe('dice record', () => {
 	it('names players by team and number', () => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		expect(g.teams.A.blocker.name).toBe('A1');
 		expect(g.teams.B.defender.name).toBe('B2');
 	});

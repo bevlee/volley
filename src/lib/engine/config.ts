@@ -1,8 +1,6 @@
 import type { Slot } from './types';
 
 export const config = {
-	statMin: 3,
-	statMax: 6,
 	targetScore: 21,
 	winBy: 2,
 	blockBonus: 3,

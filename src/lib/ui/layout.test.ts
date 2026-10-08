@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NUMBERED } from '../engine/lineup';
 import { fixedChoosers } from '../engine/choosers';
 import { newGame, playRally, step } from '../engine/rally';
 import type { Game } from '../engine/types';
@@ -28,7 +29,7 @@ describe('placeDice', () => {
 
 describe('roleOf', () => {
 	it('calls the attacking pair attacker and setter, and the other side blocker and defender', () => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		expect(roleOf(g, 'A', 'blocker')).toBe('Blocker');
 		expect(roleOf(g, 'A', 'defender')).toBe('Defender');
 
@@ -54,14 +55,14 @@ describe('zoneBox', () => {
 
 describe('positions', () => {
 	const game = (edit: (g: Game) => void) => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		edit(g);
 		return g;
 	};
 
 	it('has the server in their back court and the receivers back to pass', () => {
 		// B serves first with B2; A's passer (A1, the blocker) waits in 5, A2 in 1
-		expect(positions(newGame(1))).toEqual({ A: { blocker: 5, defender: 1 }, B: { blocker: 2, defender: 1 } });
+		expect(positions(newGame(1, NUMBERED))).toEqual({ A: { blocker: 5, defender: 1 }, B: { blocker: 2, defender: 1 } });
 	});
 
 	it('keeps the passers in place until the set', () => {
@@ -98,7 +99,7 @@ describe('positions', () => {
 describe('positions after a free ball mid-rally', () => {
 	it('sends the passer back to pass as the easy ball comes over, so it flies straight to them', () => {
 		// A mis-hit A's attack into an easy ball: a free ball to B
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		g.phase = { kind: 'freeBall', team: 'B' };
 		g.attack = {
 			team: 'A',
@@ -117,7 +118,7 @@ describe('positions after a free ball mid-rally', () => {
 
 describe('rollPositions', () => {
 	it('sends the passer to their passing spot, with the ball, before they roll the pass', () => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		g.phase = { kind: 'freeBall', team: 'B' };
 		g.attack = {
 			team: 'A',
@@ -136,7 +137,7 @@ describe('rollPositions', () => {
 	});
 
 	it('moves the setter to the setting spot before they roll the set', () => {
-		const before = newGame(1);
+		const before = newGame(1, NUMBERED);
 		before.phase = { kind: 'set' };
 		before.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0 };
 		const rolls = [{ team: 'A' as const, slot: 'defender' as const, die: 5, label: 'set' as const }];
@@ -144,7 +145,7 @@ describe('rollPositions', () => {
 	});
 
 	it('sets from where they stand when the digger is already on the setting spot', () => {
-		const before = newGame(1);
+		const before = newGame(1, NUMBERED);
 		before.phase = { kind: 'dug' };
 		before.attack = {
 			team: 'A',
@@ -161,24 +162,24 @@ describe('rollPositions', () => {
 	});
 
 	it('leaves everyone else where they stand', () => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		expect(rollPositions(g, [])).toEqual(positions(g));
 	});
 });
 
 describe('ballAt', () => {
 	it('starts with the server', () => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		expect(ballAt(g, positions(g))).toEqual(zoneCenter('B', 1));
 	});
 
 	it('goes to the passer once served', () => {
-		const g = step(newGame(1));
+		const g = step(newGame(1, NUMBERED));
 		expect(ballAt(g, positions(g))).toEqual(zoneCenter('A', 5));
 	});
 
 	it('stays with the passer until the set', () => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		g.phase = { kind: 'set' };
 		g.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0 };
 		// A1 passed from 5; A2 is still back in 1
@@ -186,7 +187,7 @@ describe('ballAt', () => {
 	});
 
 	it('sits in the landing zone once the ball has landed', () => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		g.phase = { kind: 'dug' };
 		g.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0, landing: 6 };
 		expect(ballAt(g, positions(g))).toEqual(zoneCenter('B', 6));
@@ -194,7 +195,7 @@ describe('ballAt', () => {
 
 	it('drops back on the hitter’s side after a stuff block', () => {
 		const g = playRally(
-			newGame(1),
+			newGame(1, NUMBERED),
 			fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }),
 			// pass, set, power 1, aim 6 (on target), block 6
 			scriptedDice([4, 4, 1, 6, 6])
@@ -208,13 +209,13 @@ describe('ballAt', () => {
 
 	it('puts a hitting error into the net in front of the hitter', () => {
 		// pass 4, set 1, power 1: two 1s
-		const g = playRally(newGame(1), fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }), scriptedDice([4, 1, 1]));
+		const g = playRally(newGame(1, NUMBERED), fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }), scriptedDice([4, 1, 1]));
 		expect(g.log.at(-1)?.data?.kind).toBe('shank');
 		expect(ballAt(g, positions(g))).toEqual({ x: zoneCenter('A', 4).x, y: 302 });
 	});
 
 	it('lands a double six on the called target', () => {
-		const g = playRally(newGame(1), fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }), scriptedDice([4, 6, 6]));
+		const g = playRally(newGame(1, NUMBERED), fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }), scriptedDice([4, 6, 6]));
 		expect(g.log.at(-1)?.data?.kind).toBe('guaranteed kill');
 		expect(ballAt(g, positions(g))).toEqual(zoneCenter('B', 1));
 	});
@@ -234,7 +235,7 @@ describe('calloutTop', () => {
 
 describe('rollBall', () => {
 	it('sends the ball straight to the setting spot as the setter gets there', () => {
-		const before = newGame(1);
+		const before = newGame(1, NUMBERED);
 		before.phase = { kind: 'set' };
 		before.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0 };
 		const rolls = [{ team: 'A' as const, slot: 'defender' as const, die: 5, label: 'set' as const }];
@@ -242,7 +243,7 @@ describe('rollBall', () => {
 	});
 
 	it('leaves the ball where it is for other rolls', () => {
-		const g = step(newGame(1));
+		const g = step(newGame(1, NUMBERED));
 		const rolls = [{ team: 'A' as const, slot: 'blocker' as const, die: 4, label: 'pass' as const }];
 		expect(rollBall(g, rolls, rollPositions(g, rolls))).toEqual(ballAt(g, positions(g)));
 	});
@@ -262,16 +263,16 @@ describe('ball flight', () => {
 	});
 
 	it('flies a serve, a spike and a tip differently', () => {
-		const served = step(newGame(1));
+		const served = step(newGame(1, NUMBERED));
 		expect(flightKind(served, false)).toBe('serve');
 		const stuffed = playRally(
-			newGame(1),
+			newGame(1, NUMBERED),
 			fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }),
 			scriptedDice([4, 4, 1, 6, 6])
 		);
 		expect(flightKind(stuffed, false)).toBe('spike');
 		const tipped = playRally(
-			newGame(1),
+			newGame(1, NUMBERED),
 			fixedChoosers({ shot: 'tip', block: 'line', stance: 'deep' }),
 			scriptedDice([4, 4, 3, 4, 1])
 		);
@@ -283,7 +284,7 @@ describe('ball flight', () => {
 
 describe('previewDefence', () => {
 	it('moves the defending pair to the spots being chosen', () => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		g.phase = { kind: 'calls' };
 		g.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0 };
 		// blocking cross leaves the line open, so a deep defender covers the line in 1
@@ -307,7 +308,7 @@ describe('coverage', () => {
 
 describe('ballAt after a block touch', () => {
 	it('keeps the ball with the blocker at the net, not where the shot was aimed', () => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		g.phase = { kind: 'touched' };
 		g.attack = {
 			team: 'A',
@@ -325,7 +326,7 @@ describe('ballAt after a block touch', () => {
 
 describe('positions after a dig on the setting spot', () => {
 	const afterSet = (dugAt: 3 | 5) => {
-		const g = newGame(1);
+		const g = newGame(1, NUMBERED);
 		g.phase = { kind: 'calls' };
 		g.attack = { team: 'B', hitter: 'defender', source: 'dig', dugAt, firstDie: 4, firstMod: 0, setDie: 4, setMod: 0 };
 		return positions(g).B;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NUMBERED } from '../engine/lineup';
 import { fixedChoosers } from '../engine/choosers';
 import { newGame, step } from '../engine/rally';
 import { scriptedDice } from '../engine/rng';
@@ -6,7 +7,7 @@ import type { Calls, Game } from '../engine/types';
 import { callout, commentary, duels, narrate, quietLine, needsDefence, needsShot, nextAction, playerActions, playsItself, playSummary, statusLine, stepEntries } from './story';
 
 function evenGame(): Game {
-	const g = newGame(1);
+	const g = newGame(1, NUMBERED);
 	for (const team of [g.teams.A, g.teams.B]) {
 		for (const p of [team.blocker, team.defender]) {
 			p.attack = 4;
@@ -190,7 +191,7 @@ describe('stepEntries', () => {
 
 describe('nextAction', () => {
 	it('names what the next step will do', () => {
-		expect(nextAction(newGame(1))).toBe('Serve');
+		expect(nextAction(newGame(1, NUMBERED))).toBe('Serve');
 		const g = evenGame();
 		expect(nextAction(g)).toBe('Pass');
 		expect(nextAction(run(1, line, [4]))).toBe('Set');
@@ -222,7 +223,7 @@ describe('nextAction', () => {
 
 describe('playsItself', () => {
 	it('runs the serve, pass and set on its own, and waits at the call and at the end of a point', () => {
-		const start = newGame(1);
+		const start = newGame(1, NUMBERED);
 		expect(playsItself(start)).toBe(true); // serve
 		expect(playsItself(run(0, line, []))).toBe(true); // pass
 		expect(playsItself(run(1, line, [4]))).toBe(true); // set

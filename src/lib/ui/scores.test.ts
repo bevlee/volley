@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NUMBERED } from '../engine/lineup';
 import { fixedChoosers } from '../engine/choosers';
 import { newGame, step } from '../engine/rally';
 import { scriptedDice } from '../engine/rng';
@@ -6,7 +7,7 @@ import type { Calls, Game } from '../engine/types';
 import { clearsSheet, scoreSheet, setLine } from './scores';
 
 function evenGame(): Game {
-	const g = newGame(1);
+	const g = newGame(1, NUMBERED);
 	for (const team of [g.teams.A, g.teams.B]) {
 		for (const p of [team.blocker, team.defender]) {
 			p.attack = 4;
@@ -28,7 +29,7 @@ const values = (terms: { value: string }[]) => terms.map((t) => t.value);
 
 describe('scoreSheet', () => {
 	it('is empty before anyone has set up an attack', () => {
-		expect(scoreSheet(newGame(1))).toBeNull();
+		expect(scoreSheet(newGame(1, NUMBERED))).toBeNull();
 		expect(scoreSheet(run(1, { shot: 'line', block: 'line', stance: 'deep' }, [4]))).toBeNull();
 	});
 

@@ -31,17 +31,20 @@
 	} = $props();
 
 	const W = 80;
+	/** Three short lines (name, role, stats): a character's name and role don't fit on one line. */
+	const H = 46;
 	const pos = Tween.of(() => ({ x, y }), { duration: 350, easing: cubicOut });
 	// Team B faces down the screen, so their dives lunge the other way.
 	const facing = $derived(team === 'A' ? -1 : 1);
 </script>
 
-<g class="chip {team}" class:hitter transform="translate({pos.current.x - W / 2} {pos.current.y - 20})">
+<g class="chip {team}" class:hitter transform="translate({pos.current.x - W / 2} {pos.current.y - H / 2})">
 	{#key actionKey}
 		<g class="body {action?.move ?? ''}" style:--facing={facing} style:--lunge={lunge}>
-			<rect width={W} height="40" rx="6" />
-			<text x={W / 2} y="16">{player.name} {role}</text>
-			<text x={W / 2} y="32" class="stats">Atk {player.attack} · Def {player.defense}</text>
+			<rect width={W} height={H} rx="6" />
+			<text x={W / 2} y="14">{player.name}</text>
+			<text x={W / 2} y="26" class="role">{role}</text>
+			<text x={W / 2} y="39" class="stats">Atk {player.attack} · Def {player.defense}</text>
 		</g>
 	{/key}
 	{#if action?.label}
@@ -79,7 +82,15 @@
 	.B text {
 		fill: var(--team-b);
 	}
+	.role {
+		font-size: 8.5px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		opacity: 0.75;
+	}
 	.stats {
+		font-size: 10px;
 		font-weight: 400;
 	}
 	.action {

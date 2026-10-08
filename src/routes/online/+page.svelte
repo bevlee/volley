@@ -120,14 +120,11 @@
 			if (g.serving === you) return { status: null, label: null, disabled: false };
 			return { status: null, label: `${them} to serve`, disabled: true };
 		}
-		if (p === 'calls' && mineIn) return { status: `Locked in · waiting for ${them}`, label: 'Locked in', disabled: true };
+		if (p === 'calls' && mineIn) return { status: `Waiting for ${them}`, label: 'Locked in', disabled: true };
 		if (p === 'calls' && theirsIn) return { status: `${them}'s call is in · your move`, label: null, disabled: false };
 		return { status: null, label: null, disabled: false };
 	});
 
-	const presence = $derived(
-		online.opponent === 'connected' ? `${them} is here` : online.opponent === 'away' ? `${them} is away` : 'Seat empty: waiting for someone to join'
-	);
 
 	const rematchLabel = $derived(
 		you && online.rematch.includes(you) ? `Waiting for ${them}…` : online.rematch.length ? `Rematch · ${them} wants one` : 'Rematch'
@@ -147,6 +144,7 @@
 		controlled={you}
 		{you}
 		names={online.names}
+		opponent={online.opponent}
 		locked={mineIn}
 		status={waiting.status}
 		stepLabel={waiting.label}
@@ -160,13 +158,14 @@
 		onleave={leave}
 	>
 		{#snippet banner()}
+			<!-- The opponent's connection shows by their name in the score; only an empty seat needs words. -->
 			<div class="room">
 				<span>Room <b>{online.code}</b></span>
-				<span class="presence" class:away={online.opponent !== 'connected'}>{presence}</span>
+				{#if online.opponent === 'waiting'}<span class="empty">· Seat empty: waiting for someone to join</span>{/if}
 			</div>
 		{/snippet}
 		{#snippet dock()}
-			{#if idle}<TurnClock clock={online.clock} {you} />{/if}
+			{#if idle}<TurnClock clock={online.clock} {you} {them} />{/if}
 		{/snippet}
 	</GameScreen>
 {:else if online.stage === 'waiting'}
@@ -256,10 +255,7 @@
 	.room b {
 		letter-spacing: 0.1em;
 	}
-	.presence {
-		color: var(--open);
-	}
-	.presence.away {
+	.empty {
 		color: var(--covered);
 	}
 	.required {

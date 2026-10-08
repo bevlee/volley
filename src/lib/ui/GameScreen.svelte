@@ -22,6 +22,7 @@
 		controlled,
 		you = null,
 		names = null,
+		opponent = null,
 		shown = $bindable(),
 		idle = $bindable(true),
 		locked = false,
@@ -47,6 +48,8 @@
 		you?: TeamId | null;
 		/** Online, each team's player's name, for the score. */
 		names?: Record<TeamId, string | null> | null;
+		/** Online, whether the other player is connected. */
+		opponent?: 'connected' | 'away' | 'waiting' | null;
 		/** What the court is showing: lags the latest state while a chain plays out. */
 		shown?: Game;
 		/** Nothing is playing out: the court shows the latest state. */
@@ -291,7 +294,7 @@
 	style:--extra-h="{bannerH + dockH}px"
 	style:--court-min={bannerH + dockH ? '200px' : undefined}
 >
-	<TopBar game={view} {you} {names} {debugOpen} onhelp={() => rules.toggle()} {ondebug} {onleave} />
+	<TopBar game={view} {you} {names} {opponent} {debugOpen} onhelp={() => rules.toggle()} {ondebug} {onleave} />
 	{#if banner}<div bind:clientHeight={bannerH}>{@render banner()}</div>{/if}
 	<Court
 		game={view}

@@ -1,6 +1,7 @@
 import { randomChoosers, type Choosers } from './choosers';
 import { config } from './config';
-import { d6, int, mulberry32, pick, type Rng, type SeededRng } from './rng';
+import { LINEUP, type Lineup } from './lineup';
+import { d6, mulberry32, pick, type Rng, type SeededRng } from './rng';
 import * as rules from './rules';
 import type { Game, LogEntry, Player, PointKind, RollLabel, Slot, Team, TeamId } from './types';
 
@@ -10,30 +11,29 @@ export const partner = (slot: Slot): Slot => (slot === 'blocker' ? 'defender' : 
 const signed = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
 const plus = (n: number) => (n >= 0 ? ` + ${n}` : ` − ${-n}`);
 
-export function newGame(seed: number): Game {
+/** A new game between the players in `lineup` (the Haikyu!! four by default). The seed decides the dice. */
+export function newGame(seed: number, lineup: Lineup = LINEUP): Game {
 	const rng = mulberry32(seed);
-	const player = (team: TeamId, slot: Slot): Player => ({
-		name: `${team}${slot === 'blocker' ? 1 : 2}`,
-		slot,
-		attack: int(rng, config.statMin, config.statMax),
-		defense: int(rng, config.statMin, config.statMax)
-	});
+	const player = (team: TeamId, slot: Slot): Player => ({ ...lineup[team][slot], slot });
 	const team = (id: TeamId): Team => ({
 		id,
 		blocker: player(id, 'blocker'),
 		defender: player(id, 'defender')
 	});
+	const teams = { A: team('A'), B: team('B') };
+	// B serves first, from its defender.
+	const server = teams.B.defender.name;
 	return {
 		seed,
 		rngState: rng.state,
-		teams: { A: team('A'), B: team('B') },
+		teams,
 		score: { A: 0, B: 0 },
 		serving: 'B',
 		servers: { A: 'defender', B: 'defender' },
 		rally: 1,
 		phase: { kind: 'serve', team: 'B' },
 		attack: null,
-		log: [{ rally: 1, text: 'B2 to serve', tag: 'rallyStart', data: { team: 'B', player: 'B2' } }],
+		log: [{ rally: 1, text: `${server} to serve`, tag: 'rallyStart', data: { team: 'B', player: server } }],
 		logStart: 0,
 		rolls: [],
 		steps: 0,

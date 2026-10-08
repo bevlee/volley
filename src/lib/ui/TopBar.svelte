@@ -6,6 +6,7 @@
 		game,
 		you = null,
 		names = null,
+		opponent = null,
 		debugOpen = false,
 		onhelp,
 		ondebug,
@@ -16,6 +17,8 @@
 		you?: TeamId | null;
 		/** Online, each team's player's name, shown under the team's letter. */
 		names?: Record<TeamId, string | null> | null;
+		/** Online, whether the other player is connected: a green dot by their name, or a red disconnected mark. */
+		opponent?: 'connected' | 'away' | 'waiting' | null;
 		debugOpen?: boolean;
 		onhelp: () => void;
 		/** Shows the debug button (only on /admin); null or missing hides it. */
@@ -26,7 +29,16 @@
 </script>
 
 {#snippet tag(team: TeamId)}
-	{#if names?.[team]}<small class:you={you === team}>{names[team]}</small>{:else if you === team}<small class="you">you</small>{/if}
+	{#if names?.[team]}
+		<small class:you={you === team}>
+			{names[team]}{#if you && team !== you && opponent === 'connected'}<span class="here" title="Connected"></span>{:else if you && team !== you && opponent === 'away'}<svg
+					class="away"
+					viewBox="0 0 10 10"
+					role="img"
+					aria-label="Disconnected"><title>Disconnected</title><circle cx="5" cy="5" r="4" /><path d="M2.2 7.8 7.8 2.2" /></svg
+				>{/if}
+		</small>
+	{:else if you === team}<small class="you">you</small>{/if}
 {/snippet}
 
 <header class="bar">
@@ -94,6 +106,25 @@
 	.score small.you {
 		font-weight: 800;
 		text-decoration: underline;
+	}
+	/* The other player's connection, after their name. */
+	.here {
+		display: inline-block;
+		width: 6px;
+		height: 6px;
+		margin-left: 3px;
+		border-radius: 50%;
+		background: var(--open);
+		vertical-align: 1px;
+	}
+	.away {
+		width: 8px;
+		height: 8px;
+		margin-left: 3px;
+		vertical-align: -0.5px;
+		fill: none;
+		stroke: var(--covered);
+		stroke-width: 1.6;
 	}
 	.score {
 		grid-area: score;
