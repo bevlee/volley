@@ -95,8 +95,14 @@ describe('landing', () => {
 		expect(landing('line', 5, 5, noTie)).toBe(6));
 
 	it('breaks ties with the tie picker', () =>
-		// tip target 3 has neighbours 2, 4, 6, all one step from a short defender in 3
-		expect(landing('tip', 5, 3, (zones) => Math.max(...zones) as Zone)).toBe(6));
+		// tip target 3 has neighbours 2, 4, 6; a deep-line defender in 1 is one step from 2 and 6
+		expect(landing('tip', 5, 1, (zones) => Math.max(...zones) as Zone)).toBe(6));
+
+	it('drifts onto a defender already standing on the target, rather than away from them', () => {
+		// a deep-line defender in 1 read the line; a short defender in 3 read the tip
+		expect(landing('line', 5, 1, noTie)).toBe(1);
+		expect(landing('tip', 5, 3, noTie)).toBe(3);
+	});
 
 	it('keeps a hard shot that went into the block on its target, for if it gets through', () =>
 		expect(landing('line', config.accuracyIntoBlock, 5, noTie)).toBe(1));

@@ -68,6 +68,8 @@ describe('rally', () => {
 		const g = playRally(evenGame(), fixedChoosers(lineIntoBlock), scriptedDice([4, 6, 6]));
 		expect(g.score).toEqual({ A: 1, B: 0 });
 		expect(lastPoint(g)?.data?.kind).toBe('guaranteed kill');
+		// there's no aim roll, so the ball lands where the shot was called
+		expect(g.attack?.landing).toBe(1);
 	});
 
 	it('stuffs a hard shot into the block', () => {

@@ -62,8 +62,9 @@ export function aimResult(shot: Shot, acc: number): AimResult {
 }
 
 /**
- * Where the ball lands. A drifting shot goes to the target's neighbour closest to the defender. A
- * shot into the block stays on its target, for if it gets through.
+ * Where the ball lands. A drifting shot drifts toward the defender: to the target's neighbour closest
+ * to them, or onto them if they're already on the target (they read the shot, and a bad hit shouldn't
+ * pull the ball away from them). A shot into the block stays on its target, for if it gets through.
  */
 export function landing(
 	shot: Shot,
@@ -74,7 +75,7 @@ export function landing(
 	const result = aimResult(shot, acc);
 	if (result === 'easy') return 'easy';
 	const target = TARGET[shot];
-	if (result !== 'drift') return target;
+	if (result !== 'drift' || defender === target) return target;
 	const options = adjacent(target);
 	const best = Math.min(...options.map((z) => distance(z, defender)));
 	const closest = options.filter((z) => distance(z, defender) === best);
