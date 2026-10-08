@@ -6,9 +6,8 @@
 	import { setLine, type Score, type ScoreSheet } from './scores';
 
 	/**
-	 * The phone's take on the score panel: one row under the court, in the order the ball meets them
-	 * (attack, then block, then dig). There's no hover on a phone, so tapping a score opens a sheet
-	 * with how it adds up.
+	 * The latest attack's scores: one row under the court, in the order the ball meets them (attack,
+	 * then block, then dig). Tapping or clicking a score opens a sheet with how it adds up.
 	 */
 	let { sheet }: { sheet: ScoreSheet | null } = $props();
 
@@ -18,7 +17,16 @@
 	let tab = $state<ScoreKind>('attack');
 	export const isOpen = () => dialog?.open ?? false;
 
-	const TITLE: Record<ScoreKind, string> = { attack: 'Attack', block: 'Block', dig: 'Dig' };
+	/** A kill is named on the attack, in the attacking team's colour. */
+	const isKill = (verdict: string) => verdict === 'Kill' || verdict === 'Tip kill';
+
+	const TITLE: Record<ScoreKind, string> = { attack: 'Attack', aim: 'Aim', block: 'Block', dig: 'Dig' };
+	const AIM_RESULT: Record<string, string> = {
+		exact: 'On target',
+		drift: 'Drifted',
+		block: 'Into the block',
+		easy: 'Mis-hit'
+	};
 
 	interface Slot {
 		kind: ScoreKind;
@@ -36,15 +44,31 @@
 			? { kind, team, who: s.who, total: `${s.total ?? (s.verdict ? '–' : '?')}`, verdict: s.verdict ?? '', open: true }
 			: { kind, team, who: '', total: rolled ? '–' : '?', verdict: '', open: false };
 
+	/** Before any ball is set: the three scores still to come, so the row keeps its shape. */
+	const BLANK: Slot[] = (['attack', 'block', 'dig'] as const).map((kind) => slot(kind, 'A', null, false));
+
 	const slots = $derived.by((): Slot[] => {
-		if (!sheet) return [];
+		if (!sheet) return BLANK;
 		const rolled = sheet.attack.total !== null || Boolean(sheet.attack.verdict);
 		const defending = other(sheet.attack.team);
 		const block = slot('block', defending, sheet.block, rolled);
 		if (!sheet.block && sheet.blockNote) Object.assign(block, { verdict: 'No block', open: true });
 		return [slot('attack', sheet.attack.team, sheet.attack, rolled), block, slot('dig', defending, sheet.dig, rolled)];
 	});
-	const tabs = $derived(slots.filter((s) => s.open));
+	/** The sheet's tabs: the open scores, with the aim after the attack once the ball is hit. */
+	const tabs = $derived.by((): Slot[] => {
+		const open = slots.filter((s) => s.open);
+		if (!sheet?.aim) return open;
+		const aim: Slot = {
+			kind: 'aim',
+			team: sheet.attack.team,
+			who: sheet.attack.who,
+			total: `${sheet.aim.total}`,
+			verdict: AIM_RESULT[sheet.aim.result],
+			open: true
+		};
+		return [open[0], aim, ...open.slice(1)];
+	});
 	const current = $derived(tabs.find((s) => s.kind === tab) ?? tabs[0]);
 
 	function show(kind: ScoreKind) {
@@ -58,42 +82,45 @@
 	});
 </script>
 
-{#snippet head(title: string, s: Score)}
+{#snippet head(title: string, s: Pick<Slot, 'team' | 'who' | 'verdict' | 'total'>)}
 	<div class="head {s.team}">
 		<span class="title">{title}</span>
 		<span class="who">{s.who}</span>
-		{#if s.verdict}<span class="verdict" class:kill={s.verdict === 'Kill'}>{s.verdict}</span>{/if}
-		<span class="total">{s.total ?? (s.verdict ? '–' : '?')}</span>
+		{#if s.verdict}<span class="verdict" class:kill={isKill(s.verdict)}>{s.verdict}</span>{/if}
+		<span class="total">{s.total}</span>
 	</div>
 {/snippet}
 
 <nav class="line" aria-label="Attack and defence scores">
-	{#if sheet}
-		{#each slots as s, i (s.kind)}
-			{#if i > 0}
-				<svg class="chevron" viewBox="0 0 8 16" width="8" height="16" aria-hidden="true"><path d="M1 2l6 6l-6 6" /></svg>
-			{/if}
-			<button
-				type="button"
-				class="slot {s.team}"
-				disabled={!s.open}
-				onclick={() => show(s.kind)}
-				aria-label="{TITLE[s.kind]}{s.who ? ` ${s.who}` : ''}: {s.total}{s.verdict ? `, ${s.verdict}` : ''}. Show how it adds up"
-			>
-				<span class="total">{s.total}</span>
-				<span class="text">
-					<span class="title">{TITLE[s.kind]} <span class="who">{s.who}</span></span>
-					<span class="verdict" class:kill={s.verdict === 'Kill'}>{s.verdict}</span>
-				</span>
-			</button>
-		{/each}
-	{:else}
-		<p class="empty">Scores show here once a ball is set.</p>
-	{/if}
+	{#each slots as s, i (s.kind)}
+		{#if i > 0}
+			<svg class="chevron" viewBox="0 0 8 16" width="8" height="16" aria-hidden="true"><path d="M1 2l6 6l-6 6" /></svg>
+		{/if}
+		<button
+			type="button"
+			class="slot {s.team}"
+			disabled={!s.open}
+			onclick={() => show(s.kind)}
+			aria-label="{TITLE[s.kind]}{s.who ? ` ${s.who}` : ''}: {s.total}{s.verdict ? `, ${s.verdict}` : ''}. Show how it adds up"
+		>
+			<span class="total">{s.total}</span>
+			<span class="text">
+				<span class="title">{TITLE[s.kind]} <span class="who">{s.who}</span></span>
+				<span class="verdict" class:kill={isKill(s.verdict)}>{s.verdict}</span>
+			</span>
+		</button>
+	{/each}
 </nav>
 
 <!-- Clicking the backdrop (the dialog element itself, outside the sheet) closes it. -->
-<dialog bind:this={dialog} onclick={(e) => e.target === dialog && dialog.close()} aria-label="How the scores add up">
+<!-- Closing hands focus back to the score that opened it; drop it, or Space would reopen the sheet
+     instead of playing on. -->
+<dialog
+	bind:this={dialog}
+	onclick={(e) => e.target === dialog && dialog.close()}
+	onclose={() => (document.activeElement as HTMLElement | null)?.blur()}
+	aria-label="How the scores add up"
+>
 	<div class="sheet">
 		<div class="bar">
 			<div class="tabs" role="tablist" aria-label="Score">
@@ -109,19 +136,23 @@
 		{#if sheet && current}
 			<div class="body" role="tabpanel">
 				{#if current.kind === 'attack'}
-					{@render head('Attack score', sheet.attack)}
+					{@render head('Attack score', current)}
 					<p class="setup"><b>{sheet.setup.join(' → ')}</b><br /><span>{setLine(sheet)}</span></p>
 					{#if sheet.note}<p class="note touch">{sheet.note}</p>{/if}
 					<div class="maths"><Breakdown kind="attack" score={sheet.attack} {sheet} /></div>
+				{:else if current.kind === 'aim'}
+					{@render head('Aim', current)}
+					<p class="note">Where the ball goes. It doesn’t change the attack score.</p>
+					<div class="maths"><Breakdown kind="aim" {sheet} /></div>
 				{:else if current.kind === 'block'}
 					{#if sheet.block}
-						{@render head('Block score', sheet.block)}
+						{@render head('Block score', current)}
 						<div class="maths"><Breakdown kind="block" score={sheet.block} {sheet} /></div>
 					{:else}
 						<p class="note">{sheet.blockNote}</p>
 					{/if}
 				{:else if sheet.dig}
-					{@render head('Dig score', sheet.dig)}
+					{@render head('Dig score', current)}
 					<div class="maths"><Breakdown kind="dig" score={sheet.dig} {sheet} /></div>
 				{/if}
 			</div>
@@ -147,12 +178,6 @@
 		border: 1px solid var(--border);
 		border-radius: 10px;
 		overflow: hidden;
-	}
-	/* Wide screens have the full score panel beside the court instead. */
-	@media (min-width: 861px) {
-		.line {
-			display: none;
-		}
 	}
 	.slot {
 		flex: 1 1 0;
@@ -215,7 +240,7 @@
 		font-weight: 700;
 	}
 	.verdict.kill {
-		color: var(--covered);
+		color: var(--team);
 	}
 	.chevron {
 		align-self: center;
@@ -226,13 +251,6 @@
 		stroke-linecap: round;
 		stroke-linejoin: round;
 	}
-	.empty {
-		margin: auto;
-		padding: 0 12px;
-		font-size: 0.85rem;
-		color: var(--muted);
-	}
-
 	/* The sheet rises from the bottom of the screen. */
 	dialog {
 		width: 100%;

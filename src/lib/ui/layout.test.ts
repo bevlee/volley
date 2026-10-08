@@ -3,7 +3,7 @@ import { fixedChoosers } from '../engine/choosers';
 import { newGame, playRally, step } from '../engine/rally';
 import type { Game } from '../engine/types';
 import { scriptedDice } from '../engine/rng';
-import { arcPoint, ballAt, calloutTop, coverage, flightKind, halfBox, shotPoint, previewDefence, placeDice, positions, rollBall, rollPositions, roleOf, zoneBox, zoneCenter } from './layout';
+import { arcPoint, ballAt, blockHands, calloutTop, coverage, flightKind, halfBox, shotPoint, previewDefence, placeDice, positions, rollBall, rollPositions, roleOf, zoneBox, zoneCenter } from './layout';
 
 describe('placeDice', () => {
 	it('lines up each player’s dice under their zone centre', () => {
@@ -96,7 +96,7 @@ describe('positions', () => {
 });
 
 describe('positions after a free ball mid-rally', () => {
-	it('holds the attack’s picture until the pass', () => {
+	it('sends the passer back to pass as the easy ball comes over, so it flies straight to them', () => {
 		// A mis-hit A's attack into an easy ball: a free ball to B
 		const g = newGame(1);
 		g.phase = { kind: 'freeBall', team: 'B' };
@@ -109,7 +109,9 @@ describe('positions after a free ball mid-rally', () => {
 			calls: { shot: 'line', block: 'line', stance: 'deep' },
 			landing: 1
 		};
-		expect(positions(g)).toEqual({ A: { blocker: 4, defender: 3 }, B: { blocker: 2, defender: 5 } });
+		// B2 is already deep in 5, so B1 drops back to the middle of the back court rather than staying at the net
+		expect(positions(g)).toEqual({ A: { blocker: 4, defender: 3 }, B: { blocker: 6, defender: 5 } });
+		expect(ballAt(g, positions(g))).toEqual(zoneCenter('B', 6));
 	});
 });
 
@@ -198,7 +200,23 @@ describe('ballAt', () => {
 			scriptedDice([4, 4, 1, 6, 6])
 		);
 		expect(g.log.at(-1)?.data?.kind).toBe('stuff');
-		expect(ballAt(g, positions(g))).toEqual(zoneCenter('A', 3));
+		// in front of the hitter in zone 4, just below the net, after meeting the blocker's hands at the net
+		const hitter = zoneCenter('A', 4);
+		expect(ballAt(g, positions(g))).toEqual({ x: hitter.x, y: 302 });
+		expect(blockHands(g, positions(g))).toEqual({ x: hitter.x, y: 280 });
+	});
+
+	it('puts a hitting error into the net in front of the hitter', () => {
+		// pass 4, set 1, power 1: two 1s
+		const g = playRally(newGame(1), fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }), scriptedDice([4, 1, 1]));
+		expect(g.log.at(-1)?.data?.kind).toBe('shank');
+		expect(ballAt(g, positions(g))).toEqual({ x: zoneCenter('A', 4).x, y: 302 });
+	});
+
+	it('lands a double six on the called target', () => {
+		const g = playRally(newGame(1), fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }), scriptedDice([4, 6, 6]));
+		expect(g.log.at(-1)?.data?.kind).toBe('guaranteed kill');
+		expect(ballAt(g, positions(g))).toEqual(zoneCenter('B', 1));
 	});
 });
 

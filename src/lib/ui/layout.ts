@@ -79,7 +79,6 @@ export function positions(g: Game): Positions {
 		pos[phase.team] = { ...RECEIVE };
 		return pos;
 	}
-	// A free ball mid-rally (an easy ball over) keeps the attack's picture until the pass.
 	if (!a) return pos;
 	const setter = partner(a.hitter);
 	if (phase.kind === 'set') {
@@ -98,8 +97,18 @@ export function positions(g: Game): Positions {
 		pos[defending].blocker = 2;
 		pos[defending].defender = defenderZone(a.calls.stance, a.calls.block);
 	}
+	// A free ball mid-rally (an easy ball over) keeps the attack's picture, except that the passer
+	// drops back to pass as it comes over, so the ball flies straight to them.
+	if (phase.kind === 'freeBall') {
+		const slot = config.freeBallReceiver;
+		pos[phase.team][slot] = passSpot(pos, phase.team, slot);
+	}
 	return pos;
 }
+
+/** Where a player passes from: their receiving spot, or the middle of the back court if their partner is there. */
+const passSpot = (pos: Positions, team: TeamId, slot: Slot): Zone =>
+	pos[team][partner(slot)] === RECEIVE[slot] ? 6 : RECEIVE[slot];
 
 /** Where everyone stands while the player is choosing a defence: the defending pair on the chosen spots. */
 export function previewDefence(g: Game, block: Channel, stance: Stance): Positions {
@@ -126,8 +135,7 @@ export function rollPositions(before: Game, rolls: Roll[]): Positions {
 		const partnerAt = pos[r.team][partner(r.slot)];
 		// If the digger is already on the setting spot, the setter sets from where they are.
 		if (r.label === 'set' && partnerAt !== SET_SPOT) pos[r.team][r.slot] = SET_SPOT;
-		// The passer gets back to their passing spot, or the middle if their partner is there.
-		if (r.label === 'pass') pos[r.team][r.slot] = partnerAt === RECEIVE[r.slot] ? 6 : RECEIVE[r.slot];
+		if (r.label === 'pass') pos[r.team][r.slot] = passSpot(pos, r.team, r.slot);
 	}
 	return pos;
 }
@@ -179,11 +187,37 @@ export function ballAt(g: Game, pos: Positions): Point {
 	if (!a) return { x: VIEW.width / 2, y: VIEW.netY };
 	// A touched ball stays up at the net with the blocker, ready for their partner to set.
 	if (g.phase.kind === 'touched') return zoneCenter(other(a.team), pos[other(a.team)].blocker);
-	// A stuffed ball drops straight back down on the hitter's side of the net.
-	if (stepEntries(g).some((e) => e.tag === 'point' && e.data?.kind === 'stuff')) return zoneCenter(a.team, 3);
+	// A stuffed ball comes off the block and drops just in front of the hitter, on their side of the net.
+	if (stepEntries(g).some((e) => e.tag === 'point' && e.data?.kind === 'stuff')) {
+		return { x: blockHandsX(g, pos), y: VIEW.netY + (a.team === 'A' ? STUFF_DROP : -STUFF_DROP) };
+	}
+	// A hitting error (two 1s) goes into the net in front of the hitter.
+	const entries = stepEntries(g);
+	if (entries.some((e) => e.tag === 'swing') && entries.some((e) => e.tag === 'point' && e.data?.kind === 'shank')) {
+		const hitterX = zoneCenter(a.team, pos[a.team][a.hitter]).x;
+		return { x: hitterX, y: VIEW.netY + (a.team === 'A' ? STUFF_DROP : -STUFF_DROP) };
+	}
 	if (a.landing) return zoneCenter(other(a.team), a.landing);
 	// Before the set the ball stays with the passer or digger; after it, it's with the hitter.
 	return zoneCenter(a.team, pos[a.team][a.hitter]);
+}
+
+/** How far from the net a stuffed ball lands. */
+const STUFF_DROP = 22;
+
+const blockHandsX = (g: Game, pos: Positions) => {
+	const defending = other(g.attack!.team);
+	return zoneCenter(defending, pos[defending].blocker).x;
+};
+
+/**
+ * Where a blocked ball meets the block, if the latest step had a stuff or a touch: the blocker's
+ * hands, on the net in front of them. The ball flies there first, then on to where it ends up.
+ */
+export function blockHands(g: Game, pos: Positions): Point | null {
+	const block = stepEntries(g).find((e) => e.tag === 'block');
+	if (!g.attack || !block || block.data?.result === 'clean') return null;
+	return { x: blockHandsX(g, pos), y: VIEW.netY };
 }
 
 /** Where the ball is while a step's dice roll: on a pass or set it goes to that player at their spot. */
@@ -208,14 +242,16 @@ export function calloutTop(team: TeamId, pos: Positions): number {
 	return (100 * best) / VIEW.height;
 }
 
-export type FlightKind = 'spike' | 'tip' | 'serve' | 'lob';
+export type FlightKind = 'spike' | 'tip' | 'serve' | 'lob' | 'drop';
 
 /** How high (viewBox units) and how long (ms) each kind of ball flies. */
 export const FLIGHT: Record<FlightKind, { apex: number; ms: number }> = {
 	spike: { apex: 10, ms: 280 },
 	tip: { apex: 45, ms: 520 },
 	serve: { apex: 80, ms: 760 },
-	lob: { apex: 55, ms: 560 }
+	lob: { apex: 55, ms: 560 },
+	/** Off the block: a short fall from the net. */
+	drop: { apex: 18, ms: 380 }
 };
 
 /** The kind of flight the ball is on: an attack from the latest step, a serve, or a pass or set. */

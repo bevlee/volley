@@ -18,8 +18,8 @@
 		names?: Record<TeamId, string | null> | null;
 		debugOpen?: boolean;
 		onhelp: () => void;
-		/** Shows the debug button; games against the computer only. */
-		ondebug?: () => void;
+		/** Shows the debug button (only on /admin); null or missing hides it. */
+		ondebug?: (() => void) | null;
 		/** Online: shows a Leave button next to the rules. */
 		onleave?: () => void;
 	} = $props();

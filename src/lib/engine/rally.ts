@@ -208,6 +208,8 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			}
 			if (rules.isGuaranteedKill(a.setDie!, powerDie)) {
 				log(`${hitter.name} swings · d6 6`, 'swing', { player: hitter.name, team: a.team, slot: a.hitter, shot: calls.shot, die: 6 });
+				// No aim roll: an unstoppable hit lands where it was called.
+				a.landing = rules.TARGET[calls.shot];
 				return scorePoint(g, a.team, 'guaranteed kill', '6 on the set, 6 on the hit');
 			}
 

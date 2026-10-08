@@ -1,8 +1,8 @@
 const KEY = 'volley:full-maths';
 
 /**
- * "See details" adds what every number means, and the aim's outcome table, to a score's breakdown. Off by default;
- * shared by the score panel and the phone's score sheet, and remembered between visits.
+ * "See details" adds what every number means, and the aim's outcome table, to a score's breakdown.
+ * Off by default, and remembered between visits.
  */
 export const maths = $state({ full: false });
 

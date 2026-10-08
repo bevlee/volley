@@ -1,21 +1,20 @@
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
 	import type { Channel, Game, Shot, Stance, TeamId } from '#lib/engine/types.ts';
+	import BuildUp from './BuildUp.svelte';
 	import Controls from './Controls.svelte';
 	import Court from './Court.svelte';
-	import RallyHistory from './RallyHistory.svelte';
 	import Rules from './Rules.svelte';
 	import ScoreLine from './ScoreLine.svelte';
-	import ScorePanel from './ScorePanel.svelte';
 	import TopBar from './TopBar.svelte';
 	import { ballAt, placeDice, positions, rollBall, rollPositions, type PlacedDie, type Point, type Positions } from './layout.ts';
-	import { scoreSheet, type ScoreSheet } from './scores.ts';
-	import { needsDefence, needsShot, nextAction, statusLine, stepEntries } from './story.ts';
+	import { clearsSheet, scoreSheet, type ScoreSheet } from './scores.ts';
+	import { commentary, needsDefence, needsShot, nextAction, prompt, quietLine, statusLine, stepEntries } from './story.ts';
 	import { MOVE_MS, RESOLVE_MS, pauseAfter } from './timing.ts';
 
 	/**
 	 * The court and everything around it, for one game. It doesn't step the engine: whoever runs the
-	 * game (the page against the computer, or the server online) hands it chains of states to play
+	 * game (Game.svelte against the computer, or the server online) hands it chains of states to play
 	 * with `playChain`, and hears about the player's moves through `onadvance`, `onshot` and `ondefence`.
 	 */
 	let {
@@ -36,7 +35,7 @@
 		ondefence,
 		onover,
 		debugOpen = false,
-		ondebug,
+		ondebug = null,
 		onleave,
 		banner,
 		dock
@@ -67,8 +66,8 @@
 		/** The game-over button. */
 		onover: () => void;
 		debugOpen?: boolean;
-		/** Shows the debug button and the D key. */
-		ondebug?: () => void;
+		/** Shows the debug button and the D key (/admin only); null hides them. */
+		ondebug?: (() => void) | null;
 		/** Online: a Leave button in the top bar. */
 		onleave?: () => void;
 		/** Under the top bar. */
@@ -77,14 +76,21 @@
 		dock?: Snippet;
 	} = $props();
 
-	/** The banner's and dock's heights, measured, so the court shrinks to keep the controls on screen. */
-	let bannerH = $state(0);
-	let dockH = $state(0);
+	/**
+	 * How the play is described under the court, while we compare (?commentary=…): `line` is one line
+	 * for the latest moment, `off` only says whose call it is and how the point ended, `feed` keeps
+	 * the whole rally's commentary on screen.
+	 */
+	type Commentary = 'line' | 'off' | 'feed';
+	const mode: Commentary = ((m) => (m === 'off' || m === 'feed' ? m : 'line'))(
+		new URLSearchParams(location.search).get('commentary')
+	);
 
 	/** The latest state: what play has reached. `initial` only sets where it starts. */
 	const start = untrack(() => initial);
 	let game = $state.raw(start);
 	shown = start;
+	const view = $derived(shown ?? start);
 	/** Overrides where the court draws players and the ball while someone runs to their spot to roll. */
 	let staged = $state.raw<{ pos: Positions; ball: Point } | null>(null);
 	/** The shot the player is hovering, previewed on the court. */
@@ -93,36 +99,44 @@
 	let shotPick = $state<Shot>('line');
 	/** The defence the player is setting up; kept between rallies as their default. */
 	let defence = $state<{ block: Channel; stance: Stance }>({ block: 'line', stance: 'deep' });
-	const view = $derived(shown ?? initial);
 	const choosing = $derived(needsShot(view, controlled) && view === game && !locked);
 	const defending = $derived(needsDefence(view, controlled) && view === game && !locked);
-	/** The latest attack's numbers. They stay up after the rally ends, until the next ball is set or a new game. */
+	/** The latest attack's numbers. They stay up after the attack, until a new possession or rally starts (see clearsSheet). */
 	let sheet = $state.raw<ScoreSheet | null>(null);
 	$effect(() => {
 		const next = scoreSheet(view);
-		if (next || view.steps === 0) sheet = next;
+		if (next || view.steps === 0 || clearsSheet(view)) sheet = next;
 	});
 	let rules: Rules;
 	let scoreLine: ScoreLine;
 	/** Dice on the court. A possession's pass and set dice stay (faded) until the attack, so you can see the build-up. */
 	let dice = $state.raw<{ key: number; items: (PlacedDie & { step: number })[] }>({ key: 0, items: [] });
 	let timers: ReturnType<typeof setTimeout>[] = [];
-	/** States still to play after the one on screen. */
-	let pending: Game[] = [];
-
-	const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-
+	/** Steps still to play on their own after the one on screen. */
+	let pending = $state.raw<Game[]>([]);
+	/**
+	 * Play is running on its own (a step animating, or the serve, pass or set still to come): the
+	 * main button waits, showing where play is heading, until it's the player's turn again.
+	 */
+	const busy = $derived(view !== game || pending.length > 0);
+	const heading = $derived(pending.at(-1) ?? game);
 	$effect(() => {
-		idle = view === game && pending.length === 0;
+		idle = !busy;
 	});
 	$effect(() => () => timers.forEach(clearTimeout));
+
+	/** The banner's and dock's heights, measured, so the court shrinks to keep the controls on screen. */
+	let bannerH = $state(0);
+	let dockH = $state(0);
+
+	const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 	/**
 	 * Show a new state in beats, in volleyball order:
 	 * 1. move: anyone who must get to a spot before rolling runs there (a setter to the setting spot);
 	 * 2. roll: the step's dice tumble where the rollers stand;
 	 * 3. resolve: once the dice settle, players move on, the ball moves and the log updates.
-	 * Jumps (a snapshot, the debug drawer's Play rally) go straight to the end.
+	 * Jumps (a snapshot, the debug panel's Play rally) go straight to the end.
 	 */
 	function show(next: Game, animate: boolean, onDone?: () => void) {
 		timers.forEach(clearTimeout);
@@ -130,6 +144,7 @@
 		shown = game; // finish any step still playing out
 		staged = null;
 		game = next;
+		const from = shown!;
 		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 		// A new rally or an attack clears the court's dice; a pass or set adds to them.
 		const fresh =
@@ -143,7 +158,6 @@
 			shown = next;
 			onDone?.();
 		};
-		const from = shown!;
 		if (!animate || !next.rolls.length || reduced) {
 			dice = { key: next.steps, items: place(animate ? rollPositions(from, next.rolls) : positions(next)) };
 			return finish();
@@ -162,10 +176,17 @@
 		} else roll();
 	}
 
+	/** After a step has played out: pause, then play the next one still to come. */
 	function playNext() {
-		const following = pending.shift();
-		if (following) timers.push(setTimeout(() => show(following, true, playNext), pauseAfter(game)));
-		else idle = true;
+		// A step leaves the queue only when it starts, so play counts as busy through the pause before it.
+		const [following, ...rest] = pending;
+		if (!following) return;
+		timers.push(
+			setTimeout(() => {
+				pending = rest;
+				show(following, true, playNext);
+			}, pauseAfter(game))
+		);
 	}
 
 	/**
@@ -174,9 +195,8 @@
 	 */
 	export function playChain(chain: Game[]) {
 		if (!chain.length) return;
-		idle = false;
-		if (pending.length || view !== game) {
-			pending.push(...chain);
+		if (busy) {
+			pending = [...pending, ...chain];
 			return;
 		}
 		pending = chain.slice(1);
@@ -203,7 +223,7 @@
 	}
 
 	const stepOnce = () => {
-		if (pending.length || view !== game) return skip();
+		if (busy) return skip();
 		if (game.phase.kind === 'gameOver') return;
 		if (defending) return setDefence();
 		if (choosing) return attack();
@@ -263,85 +283,74 @@
 
 <svelte:window {onkeydown} />
 
-<!-- --chrome-h is roughly the top bar plus the dock (and the rally history and scoreline when narrow), so the court fills the rest of the screen. -->
-<!-- With a banner and clocks (online), the court may shrink as far as it does on a phone, so the controls still fit a laptop screen. -->
-<main style:--extra-h="{bannerH + dockH}px" style:--court-min={bannerH + dockH ? '200px' : undefined}>
+<!-- One column at every size: the court, the controls, then how the attack was built and its scores.
+     --chrome-h is roughly everything but the court, so the court fills the rest of the screen; online,
+     the measured banner and clocks are added to it. -->
+<main
+	class:feed={mode === 'feed'}
+	style:--extra-h="{bannerH + dockH}px"
+	style:--court-min={bannerH + dockH ? '200px' : undefined}
+>
 	<TopBar game={view} {you} {names} {debugOpen} onhelp={() => rules.toggle()} {ondebug} {onleave} />
 	{#if banner}<div bind:clientHeight={bannerH}>{@render banner()}</div>{/if}
-	<div class="play">
-		<div class="side"><ScorePanel {sheet} /></div>
-		<div class="centre">
-			<Court
-				game={view}
-				{dice}
-				{staged}
-				preview={choosing ? (preview ?? shotPick) : null}
-				defencePreview={defending ? defence : null}
-				onshot={choosing ? choose : null}
-				onpreview={(s) => (preview = s)}
-			/>
-			<RallyHistory game={view} />
-			<ScoreLine {sheet} bind:this={scoreLine} />
-			{#if dock}<div bind:clientHeight={dockH}>{@render dock()}</div>{/if}
-			<Controls
-				status={status ?? statusLine(view, controlled)}
-				{choosing}
-				{defending}
-				bind:defence
-				ondefend={setDefence}
-				shot={shotPick}
-				onshot={choose}
-				onattack={attack}
-				onpreview={(s) => (preview = s)}
-				over={view.phase.kind === 'gameOver'}
-				next={stepLabel ?? nextAction(view, controlled)}
-				{stepDisabled}
-				onstep={stepOnce}
-				{overLabel}
-				{overDisabled}
-				onnewgame={onover}
-			/>
-		</div>
-	</div>
+	<Court
+		game={view}
+		{dice}
+		{staged}
+		preview={choosing ? (preview ?? shotPick) : null}
+		defencePreview={defending ? defence : null}
+		onshot={choosing ? choose : null}
+		onpreview={(s) => (preview = s)}
+	/>
+	{#if dock}<div bind:clientHeight={dockH}>{@render dock()}</div>{/if}
+	<Controls
+		status={status ??
+			(mode === 'line' ? statusLine(view, controlled) : mode === 'off' ? quietLine(view, controlled) : (prompt(view, controlled) ?? ''))}
+		feed={mode === 'feed' ? commentary(view) : null}
+		{choosing}
+		{defending}
+		bind:defence
+		ondefend={setDefence}
+		shot={shotPick}
+		onshot={choose}
+		onattack={attack}
+		onpreview={(s) => (preview = s)}
+		over={view.phase.kind === 'gameOver'}
+		next={stepLabel ?? nextAction(busy ? heading : view, controlled)}
+		{busy}
+		{stepDisabled}
+		onstep={stepOnce}
+		{overLabel}
+		{overDisabled}
+		onnewgame={onover}
+	/>
+	<BuildUp game={view} />
+	<ScoreLine {sheet} bind:this={scoreLine} />
 </main>
 <Rules bind:this={rules} />
 
 <style>
 	main {
-		max-width: 880px;
+		max-width: 600px;
 		margin: 0 auto;
 		padding: 0 16px 8px;
-		--chrome-h: calc(230px + var(--extra-h));
-	}
-	/* Scores on the left of the court (the debug drawer slides in on the right). */
-	.play {
-		display: grid;
-		grid-template-columns: 260px minmax(0, 560px);
-		justify-content: center;
-		gap: 16px;
-		align-items: start;
-	}
-	.side {
-		padding-top: 8px;
-	}
-	/* Narrower, the court takes the full width and a one-row scoreline under it stands in for the panel. */
-	@media (max-width: 860px) {
-		main {
-			--chrome-h: calc(338px + var(--extra-h));
-		}
-		.play {
-			grid-template-columns: minmax(0, 1fr);
-		}
-		.side {
-			display: none;
-		}
+		--chrome-h: calc(346px + var(--extra-h));
 	}
 	/* The top bar fits in one row on a phone. With the browser's bars showing, a phone can be short:
 	   let the court shrink further rather than push the controls off the screen. */
 	@media (max-width: 600px) {
 		main {
-			--chrome-h: calc(324px + var(--extra-h));
+			--chrome-h: calc(332px + var(--extra-h));
 			--court-min: 200px;
+		}
+	}
+	/* The commentary feed is a few lines taller than the one-line status. */
+	main.feed {
+		--chrome-h: calc(420px + var(--extra-h));
+	}
+	@media (max-width: 600px) {
+		main.feed {
+			--chrome-h: calc(406px + var(--extra-h));
 		}
 	}
 </style>

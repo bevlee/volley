@@ -3,6 +3,7 @@
 
 	let {
 		status,
+		feed = null,
 		choosing,
 		defending,
 		defence = $bindable(),
@@ -13,6 +14,7 @@
 		onpreview,
 		over,
 		next,
+		busy = false,
 		stepDisabled = false,
 		onstep,
 		overLabel = 'New game',
@@ -21,6 +23,8 @@
 	}: {
 		/** One line on whose call it is or what just happened. */
 		status: string;
+		/** The rally's commentary so far, shown above the status; null for just the status. */
+		feed?: string[] | null;
 		/** It's the player's attack: show the shot buttons instead of Step. */
 		choosing: boolean;
 		/** It's the other team's attack: show the block and dig choices. */
@@ -38,6 +42,8 @@
 		over: boolean;
 		/** What the next step does, e.g. "Attack!", or what it's waiting for online. */
 		next: string;
+		/** Play is running on its own: the step button waits (Space still skips ahead). */
+		busy?: boolean;
 		/** Online, when it's the other player's move. */
 		stepDisabled?: boolean;
 		onstep: () => void;
@@ -46,6 +52,12 @@
 		overDisabled?: boolean;
 		onnewgame: () => void;
 	} = $props();
+
+	// The feed keeps the latest line in view.
+	let feedBox = $state<HTMLElement>();
+	$effect(() => {
+		if (feed?.length && feedBox) feedBox.scrollTop = feedBox.scrollHeight;
+	});
 
 	function run(e: MouseEvent, action: () => void) {
 		(e.currentTarget as HTMLElement).blur();
@@ -69,6 +81,15 @@
 
 <!-- Buttons drop focus after a click, so Space keeps meaning "next step" rather than re-pressing them. -->
 <section class="dock">
+	{#if feed}
+		<ol class="feed" bind:this={feedBox} aria-label="Commentary" aria-live="polite">
+			{#each feed as line, i (i)}
+				<li class:latest={i === feed.length - 1}>{line}</li>
+			{:else}
+				<li class="latest">&nbsp;</li>
+			{/each}
+		</ol>
+	{/if}
 	<p class="status" aria-live="polite">{status}</p>
 	<div class="row">
 		{#if over}
@@ -109,7 +130,7 @@
 			</span>
 			<button class="primary" onclick={(e) => run(e, ondefend)}>Lock in <kbd>Space</kbd></button>
 		{:else}
-			<button class="primary wide" disabled={stepDisabled} onclick={(e) => run(e, onstep)} title="Space or → also steps">
+			<button class="primary wide" disabled={busy || stepDisabled} onclick={(e) => run(e, onstep)} title="Space or → also steps">
 				{next}{#if !stepDisabled}&nbsp;<kbd>Space</kbd>{/if}
 			</button>
 		{/if}
@@ -140,6 +161,27 @@
 		font-weight: 600;
 		min-height: 1.5em;
 	}
+	/* Four lines of the rally, the latest at the bottom in full, earlier ones fading up. */
+	.feed {
+		box-sizing: border-box;
+		width: 100%;
+		height: calc(4 * 1.4em + 12px);
+		margin: 0;
+		padding: 6px 12px;
+		overflow-y: auto;
+		scrollbar-width: none;
+		list-style: none;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		font-size: 0.85rem;
+		line-height: 1.4;
+		color: var(--muted);
+	}
+	.feed .latest {
+		color: var(--text);
+		font-weight: 700;
+	}
 	.row {
 		display: flex;
 		flex-wrap: wrap;
@@ -169,6 +211,10 @@
 	}
 	.primary.wide {
 		min-width: 12rem;
+	}
+	.primary:disabled {
+		opacity: 0.35;
+		cursor: default;
 	}
 	.group {
 		display: inline-flex;
