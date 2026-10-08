@@ -41,7 +41,7 @@ export interface SocketOptions {
 
 type Ack = (reply: { code: string; team: string } | { error: string }) => void;
 
-const ACTIONS = ['serve', 'shot', 'defence', 'rematch', 'rename'] as const;
+const ACTIONS = ['serve', 'shot', 'defence', 'rematch'] as const;
 const NO_NAME = 'Pick a name';
 
 export function attachSockets(http: HttpServer, { store, now = Date.now, sweepMs = 60_000 }: SocketOptions) {

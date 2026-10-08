@@ -116,13 +116,11 @@ describe('sockets', () => {
 		expect(after[0].log.find((e) => e.tag === 'calls' && e.rally === atCall.rally)?.data).toMatchObject({ shot: 'tip', block: 'line', stance: 'short' });
 	});
 
-	it('shows both names, and a rename to both players, mid-game', async () => {
+	it('shows both names to both players', async () => {
 		const { url } = await startServer();
 		const { a, b } = await pair(url);
 		expect(a.got.snapshot!.at(-1)).toMatchObject({ names: { A: 'Ann', B: 'Bo' } });
-		const renamed = b.next('names');
-		a.emit('rename', { name: 'Annie' });
-		expect(await renamed).toEqual({ event: 'names', names: { A: 'Annie', B: 'Bo' } });
+		expect(b.got.snapshot!.at(-1)).toMatchObject({ names: { A: 'Ann', B: 'Bo' } });
 	});
 
 	it('gives a player who reconnects their seat and where the game is', async () => {

@@ -37,6 +37,7 @@
 		onover,
 		debugOpen = false,
 		ondebug,
+		onleave,
 		banner,
 		dock
 	}: {
@@ -68,6 +69,8 @@
 		debugOpen?: boolean;
 		/** Shows the debug button and the D key. */
 		ondebug?: () => void;
+		/** Online: a Leave button in the top bar. */
+		onleave?: () => void;
 		/** Under the top bar. */
 		banner?: Snippet;
 		/** Between the court and the controls. */
@@ -263,7 +266,7 @@
 <!-- --chrome-h is roughly the top bar plus the dock (and the rally history and scoreline when narrow), so the court fills the rest of the screen. -->
 <!-- With a banner and clocks (online), the court may shrink as far as it does on a phone, so the controls still fit a laptop screen. -->
 <main style:--extra-h="{bannerH + dockH}px" style:--court-min={bannerH + dockH ? '200px' : undefined}>
-	<TopBar game={view} {you} {names} {debugOpen} onhelp={() => rules.toggle()} {ondebug} />
+	<TopBar game={view} {you} {names} {debugOpen} onhelp={() => rules.toggle()} {ondebug} {onleave} />
 	{#if banner}<div bind:clientHeight={bannerH}>{@render banner()}</div>{/if}
 	<div class="play">
 		<div class="side"><ScorePanel {sheet} /></div>

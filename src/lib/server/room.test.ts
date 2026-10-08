@@ -105,22 +105,13 @@ describe('rooms', () => {
 });
 
 describe('names', () => {
-	it('are in the snapshot, change at any time, and ignore names that clean to nothing', () => {
-		const room = seated();
-		const r = act(room, 'B', { type: 'rename', name: '  Sammy\u0007  ' }, 5);
-		expect(msgs(r.send, 'names')).toEqual([
-			{ event: 'names', names: { A: 'Bev', B: 'Sammy' } },
-			{ event: 'names', names: { A: 'Bev', B: 'Sammy' } }
-		]);
-		expect(act(room, 'B', { type: 'rename', name: '   ' }, 6).send).toEqual([]);
-		expect(act(room, 'B', { type: 'rename', name: 'Sammy' }, 7).send).toEqual([]);
-		expect(room.seats.B!.name).toBe('Sammy');
-	});
-
-	it('can be changed before anyone has joined', () => {
+	it('are in the snapshot for both players', () => {
 		const room = createRoom('KXQT', 'p1', 'Bev', 1, 0);
-		expect(act(room, 'A', { type: 'rename', name: 'Bevan' }, 1).send).toHaveLength(2);
-		expect(room.seats.A!.name).toBe('Bevan');
+		const joined = join(room, 'p2', 'Sam', 0) as { send: Send[] };
+		expect(msgs(joined.send, 'snapshot').map((m) => m.names)).toEqual([
+			{ A: 'Bev', B: 'Sam' },
+			{ A: 'Bev', B: 'Sam' }
+		]);
 	});
 
 	it('go with the players when they swap teams for a rematch', () => {

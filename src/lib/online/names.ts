@@ -1,6 +1,6 @@
 /**
  * Players' names: a label on a seat, never an identity (the playerId is that), so two players can
- * share one and a rename changes nothing else. Shared by the browser and the server.
+ * share one. Shared by the browser and the server.
  */
 
 export const NAME_MAX = 16;

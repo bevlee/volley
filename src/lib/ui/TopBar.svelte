@@ -9,7 +9,8 @@
 		names = null,
 		debugOpen = false,
 		onhelp,
-		ondebug
+		ondebug,
+		onleave
 	}: {
 		game: Game;
 		/** Online, the team this player has. */
@@ -20,6 +21,8 @@
 		onhelp: () => void;
 		/** Shows the debug button; games against the computer only. */
 		ondebug?: () => void;
+		/** Online: shows a Leave button next to the rules. */
+		onleave?: () => void;
 	} = $props();
 </script>
 
@@ -46,6 +49,7 @@
 		{/if}
 	</span>
 	<div class="icons">
+		{#if onleave}<button class="leave" onclick={onleave}>Leave</button>{/if}
 		<button class="icon" onclick={onhelp} aria-label="Rules" title="Rules (?)">?</button>
 		{#if ondebug}
 			<button class="icon" class:on={debugOpen} onclick={ondebug} aria-label="Debug panel" aria-pressed={debugOpen} title="Debug panel (D)">
@@ -179,6 +183,17 @@
 			width: 40px;
 			height: 40px;
 		}
+		.leave {
+			height: 40px;
+			border-radius: 20px;
+		}
+	}
+	.leave {
+		height: 32px;
+		border-radius: 16px;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--muted);
 	}
 	.icon.on {
 		background: var(--text);

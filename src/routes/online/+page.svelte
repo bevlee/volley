@@ -157,13 +157,12 @@
 		onshot={(shot) => online.shot(screen!.latest().steps, shot)}
 		ondefence={(d) => online.defence(screen!.latest().steps, d)}
 		onover={() => online.askRematch()}
+		onleave={leave}
 	>
 		{#snippet banner()}
 			<div class="room">
 				<span>Room <b>{online.code}</b></span>
-				<NameField name={online.name} prefix="You're" onsave={(n) => online.rename(n)} />
 				<span class="presence" class:away={online.opponent !== 'connected'}>{presence}</span>
-				<button onclick={leave}>Leave game</button>
 			</div>
 		{/snippet}
 		{#snippet dock()}
@@ -177,7 +176,7 @@
 			<b>Copy invite link</b>
 			<span>Opens the game for them straight away.</span>
 		</button>
-		<p class="note">Waiting for your opponent… <NameField name={online.name} onsave={(n) => online.rename(n)} /></p>
+		<p class="note">Waiting for your opponent…</p>
 		<button class="cancel" onclick={leave}>Cancel</button>
 	</Menu>
 {:else}
@@ -194,10 +193,10 @@
 					join(linkCode!);
 				}}
 			>
-				<label for="name"><b>Join room {normaliseCode(linkCode)}</b></label>
-				<span>Pick a name your opponent will see. You can change it any time.</span>
+				<b>Join room {normaliseCode(linkCode)}</b>
+				<label for="name">Your name <span class="required" aria-hidden="true">*</span></label>
 				<div class="row">
-					<input id="name" bind:this={nameBox} bind:value={nameInput} placeholder="Your name" maxlength={NAME_MAX} autocomplete="nickname" />
+					<input id="name" bind:this={nameBox} bind:value={nameInput} placeholder="Your name" maxlength={NAME_MAX} autocomplete="nickname" aria-required="true" />
 					<button type="submit" disabled={busy}>Join</button>
 				</div>
 			</form>
@@ -207,10 +206,10 @@
 				<p class="note"><NameField name={online.name} onsave={(n) => online.rename(n)} /></p>
 			{:else}
 				<div class="choice join">
-					<label for="name"><b>Your name</b></label>
-					<span>What your opponent sees. You can change it any time.</span>
+					<label for="name"><b>Your name <span class="required" aria-hidden="true">*</span></b></label>
+					<span>What your opponent sees. Needed to play.</span>
 					<div class="row">
-						<input id="name" bind:this={nameBox} bind:value={nameInput} placeholder="Your name" maxlength={NAME_MAX} autocomplete="nickname" />
+						<input id="name" bind:this={nameBox} bind:value={nameInput} placeholder="Your name" maxlength={NAME_MAX} autocomplete="nickname" aria-required="true" />
 					</div>
 				</div>
 			{/if}
@@ -263,9 +262,9 @@
 	.presence.away {
 		color: var(--covered);
 	}
-	.room button {
-		font-size: 0.8rem;
-		padding: 2px 10px;
+	.required {
+		color: var(--covered);
+		font-weight: 700;
 	}
 	.code {
 		margin: 0;

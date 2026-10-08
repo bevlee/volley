@@ -147,15 +147,14 @@ export class Online {
 	}
 
 	/**
-	 * Sets the player's name and remembers it. In a room, both players see the change straight away;
-	 * nothing else depends on the name. Returns false for a name that cleans to nothing.
+	 * Sets the player's name for their next room and remembers it. Returns false for a name that
+	 * cleans to nothing. A room keeps the name the player joined it with.
 	 */
 	rename(raw: string): boolean {
 		const name = cleanName(raw);
 		if (!name) return false;
 		this.name = name;
 		saveName(name);
-		if (this.team) this.socket.emit('rename', { name });
 		return true;
 	}
 

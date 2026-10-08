@@ -2,7 +2,6 @@ import { randomChoosers, type Choosers } from '../engine/choosers';
 import { newGame, other, step } from '../engine/rally';
 import { recordGame, type GameRecord, type RecordedCall } from '../engine/replay';
 import type { Channel, Game, Shot, Stance, TeamId } from '../engine/types';
-import { cleanName } from '../online/names';
 import type { Action, ClockView, FromClient, Names, Presence, ToClient } from '../online/protocol';
 
 export type { Action, ClockView, FromClient, Names, Presence, ToClient };
@@ -29,7 +28,7 @@ const STANCES: readonly Stance[] = ['deep', 'short'];
 
 export interface Seat {
 	playerId: string;
-	/** Shown to both players. Can change at any time; nothing depends on it. */
+	/** Shown to both players; set when they take the seat. Nothing depends on it. */
 	name: string;
 	connected: boolean;
 }
@@ -286,7 +285,6 @@ const NOTHING: Outcome = { send: [] };
 /** Applies one message from a seated player. Anything out of turn, stale or invalid is ignored. */
 export function act(room: Room, team: TeamId, msg: FromClient, now: number, seed = newSeed): Outcome {
 	const g = room.game;
-	if (msg.type === 'rename') return rename(room, team, msg.name, now);
 	const bothSeated = room.seats.A && room.seats.B;
 	if (!bothSeated) return NOTHING;
 	if (msg.type === 'rematch') return rematch(room, team, now, seed);
@@ -309,16 +307,6 @@ export function act(room: Room, team: TeamId, msg: FromClient, now: number, seed
 		}
 	}
 	return NOTHING;
-}
-
-/** Any time, even mid-game: the name is only a label. A name that cleans to nothing is ignored. */
-function rename(room: Room, team: TeamId, raw: unknown, now: number): Outcome {
-	const name = cleanName(raw);
-	const seat = room.seats[team];
-	if (!seat || !name || name === seat.name) return NOTHING;
-	seat.name = name;
-	room.lastActive = now;
-	return { send: out('both', { event: 'names', names: names(room) }) };
 }
 
 /** One side has locked in: the other side learns only that, and their clock is the only one left. */

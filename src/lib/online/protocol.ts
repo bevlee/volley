@@ -43,6 +43,5 @@ export type FromClient =
 	| { type: 'serve'; at: number }
 	| { type: 'shot'; at: number; shot: Shot }
 	| { type: 'defence'; at: number; block: Channel; stance: Stance }
-	| { type: 'rematch' }
-	| { type: 'rename'; name: string };
+	| { type: 'rematch' };
 

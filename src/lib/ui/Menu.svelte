@@ -1,15 +1,27 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	/** A centred column for the main screen and the online lobby. Choices inside use the `choice` class. */
-	let { title, subtitle, back, children }: { title: string; subtitle?: string; back?: { href: string; label: string }; children: Snippet } = $props();
+	/**
+	 * A centred column for the main screen and the online lobby. Choices inside use the `choice`
+	 * class. `art` goes beside the column on a wide screen and above it on a phone.
+	 */
+	let {
+		title,
+		subtitle,
+		back,
+		art,
+		children
+	}: { title: string; subtitle?: string; back?: { href: string; label: string }; art?: Snippet; children: Snippet } = $props();
 </script>
 
-<main>
-	{#if back}<a class="back" href={back.href}>← {back.label}</a>{/if}
-	<h1>{title}</h1>
-	{#if subtitle}<p class="subtitle">{subtitle}</p>{/if}
-	<div class="choices">{@render children()}</div>
+<main class:with-art={!!art}>
+	<div class="column">
+		{#if back}<a class="back" href={back.href}>← {back.label}</a>{/if}
+		<h1>{title}</h1>
+		{#if subtitle}<p class="subtitle">{subtitle}</p>{/if}
+		<div class="choices">{@render children()}</div>
+	</div>
+	{#if art}<div class="art">{@render art()}</div>{/if}
 </main>
 
 <style>
@@ -17,9 +29,38 @@
 		max-width: 420px;
 		margin: 0 auto;
 		padding: 12vh 16px 32px;
+	}
+	.column {
 		display: flex;
 		flex-direction: column;
 		gap: 12px;
+	}
+	/* With art: the menu on the left, the art on the right, both centred on the screen. */
+	main.with-art {
+		max-width: 860px;
+		min-height: 100dvh;
+		box-sizing: border-box;
+		padding: 24px 16px;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		align-items: center;
+		gap: 48px;
+	}
+	.art {
+		height: min(78dvh, 620px);
+	}
+	/* A phone: the art above the menu, small enough that the buttons stay on screen. */
+	@media (max-width: 700px) {
+		main.with-art {
+			grid-template-columns: minmax(0, 1fr);
+			align-content: start;
+			gap: 20px;
+			max-width: 420px;
+		}
+		.art {
+			order: -1;
+			height: 44dvh;
+		}
 	}
 	.back {
 		align-self: flex-start;
@@ -44,7 +85,7 @@
 		flex-direction: column;
 		gap: 12px;
 	}
-	/* A big tappable card: a bold line and a muted one under it. */
+	/* A big tappable card: a bold line and, sometimes, a muted one under it. */
 	.choices :global(.choice) {
 		display: flex;
 		flex-direction: column;
