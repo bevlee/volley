@@ -8,7 +8,8 @@ Every finished game, online or against the computer, is saved to Postgres and ca
 
 - One person per team, in separate browsers, playing the same game.
 - The calls stay a real guessing game: neither side can see the other's call, or the dice to come, before locking in their own.
-- Replays play back on the same court with the same animation, for as long as the rules haven't changed.
+- Online, every action has a 20-second clock, shown to both players. When it runs out, the computer makes that player's choice.
+- Replays play back on the same court with the same animation. When the rules or balance change, old games are deleted.
 - The current UI, animation and engine are reused. The engine doesn't change.
 - One Node server (SvelteKit's `adapter-node`, with WebSockets attached) and the existing Postgres in the `db` namespace.
 
@@ -33,9 +34,21 @@ So the server holds the true `Game`, runs `step` itself and sends clients copies
 The game only waits for players in two places: **the call** and **the serve** (at the start of the game and after each point). Everything else plays on its own, as it does now.
 
 1. **Lobby.** The landing page gets a third option next to playing against the computer: *Create room* / *Join room [code]*. The creator is Team A, the joiner is Team B. The creator sees the code and a copy-link button while they wait.
-2. **Serve.** In the `serve` and `pointOver` phases, the serving team's player presses Space or Serve. The other player sees "Waiting for B2 to serve". The server steps through the auto phases (serve, pass, set) up to `calls` and sends the whole chain of states.
-3. **Calls.** Both players pick at the same time, the attacker a shot and the defender a block and dig, as in single player now. After locking in you see "Waiting for the other team". The opponent sees only that you've locked in, never your call. Once both calls are in, the server steps the `calls` phase with both choices, steps `hit`, runs any auto phases that follow, and sends the chain.
+2. **Serve.** In the `serve` and `pointOver` phases, the serving team's player presses Space or Serve, or the clock serves for them. The other player sees "Waiting for B2 to serve". The server steps through the auto phases (serve, pass, set) up to `calls` and sends the whole chain of states.
+3. **Calls.** Both players pick at the same time, the attacker a shot and the defender a block and dig, as in single player now. After locking in you see "Waiting for the other team". The opponent sees only that you've locked in, never your call. If a clock runs out, the computer makes that side's call (see [Turn clock](#turn-clock)). Once both calls are in, the server steps the `calls` phase with both choices, steps `hit`, runs any auto phases that follow, and sends the chain.
 4. **Point over / game over.** Back to step 2. At game over the server saves the game and sends both players its replay link. Either player can press *Rematch*. The game starts once both have pressed it, with a new seed and the two players swapping teams. The engine always has B serve first, so swapping teams is how the first serve alternates.
+
+## Turn clock
+
+Online games only. Single player against the computer has no clock.
+
+- **What it covers:** every action a player owes. At the serve, that's the serving team. At the call, both teams at once, each for their own part.
+- **The server runs it.** When the server sends a chain of states that ends at a decision, the clock starts at *the chain's playback time + 20 s*. The players' 20 seconds then begin about when the decision shows on their screens, not while the serve and set are still animating. Playback time is worked out from the timing constants (`MOVE_MS`, `RESOLVE_MS`, `AFTER_CALLS_MS`…), which move out of `+page.svelte` into `src/lib/ui/timing.ts` so the page and the server share them. A player who skips the animation with Space just sees a few more seconds.
+- **Messages carry `msLeft`, not a timestamp.** Two phones' clocks can be seconds apart. The client sets its own deadline to receipt time + `msLeft`, so network delay makes the on-screen clock a few hundred milliseconds generous. The server's clock is the one that counts: a call that arrives after it ran out is ignored, because the computer has already chosen.
+- **On screen, for both players:** a bar that drains, with the seconds, under the status line. At the call there are two clocks, "Your call 14" and "Their call 14". When a side locks in, its clock disappears on both screens. The last 5 seconds are red.
+- **When it runs out:** the computer makes the missing part with `randomChoosers`, recorded as `byComputer`. It replays exactly as a computer call does (see [Replays](#replays)). A serve that times out is served automatically. Both screens show "Time's up, the computer called for Team B" in the status line and log.
+- **Away players:** the clock keeps running for a player who has disconnected, so the game goes on with the computer playing their side. A phone that locks for a minute comes back a few points later. If **both** players are away, the clocks stop until one reconnects; the room expiry tidies up after that.
+- In `server/room.ts` the time is passed in (`handle(room, team, msg, now)`, `tick(room, now)`), so tests use fake time and the socket layer owns the one real `setTimeout` per room.
 
 ## Protocol
 
@@ -62,6 +75,8 @@ Server → client:
 | `snapshot` | `game: PublicGame`, `locked: TeamId[]` | where things stand, after a join or resume; no animation |
 | `presence` | `opponent: 'waiting' \| 'connected' \| 'away'` | for the status line |
 | `locked` | `team` | that team has locked in a call, contents hidden |
+| `clock` | `action: 'serve' \| 'call'`, `teams: TeamId[]`, `msLeft` | who owes an action and how long they have; `teams: []` stops the clock |
+| `timedOut` | `team`, `action` | the clock ran out and the computer chose for that team |
 | `saved` | `id` | the game is over and saved; the replay is at `/replay/<id>` |
 | `error` | `message` | bad code, room full, etc. |
 
@@ -83,26 +98,30 @@ type RecordedCall = { shot: Shot; block: Channel; stance: Stance; byComputer: { 
 
 `randomChoosers` draws the computer's calls from the **same RNG as the dice**. Replaying a recorded computer call as a fixed value would skip that draw and every die after it would come out different. Replay therefore makes each call the way it was originally made: the computer's parts through `randomChoosers` (which draws again and gets the same value), the player's parts fixed. The engine calls `shot`, `block`, `stance` in a fixed order, so the draws line up. This needs no engine change and keeps every existing seed playing the same game.
 
-The recorded computer values are still stored. Replay checks them against what it gets, and a mismatch means the rules changed or the record was tampered with.
+The recorded computer values are still stored. Replay checks them against what it gets, and a mismatch means the record was tampered with. Calls the clock made in online games are recorded the same way, as computer calls.
 
-The browser runs these games, so it uploads the record at game over: `POST /api/games { seed, calls, version, rulesHash }`. The server doesn't trust the upload. It replays it with its own engine, refuses it if the computer's recorded calls don't match or the game doesn't end, and stores its **own** final score and log. A game can be faked only by playing it, and against the computer that hurts nobody. The body is capped at 64 KB and there's a per-IP rate limit (a few uploads a minute), because the endpoint is open.
+The browser runs these games, so it uploads the record at game over: `POST /api/games { seed, calls, fingerprint }`. The server doesn't trust the upload. It replays it with its own engine, refuses it if the computer's recorded calls don't match or the game doesn't end, and stores its **own** final score and log. A game can be faked only by playing it, and against the computer that hurts nobody. The body is capped at 64 KB and there's a per-IP rate limit (a few uploads a minute), because the endpoint is open.
 
 The debug drawer's Play rally / Play game buttons make every call by the computer, so they record the same way. Changing "You play" mid-game is fine too, because each call records who made it.
 
-### Versions
+### Rules changes delete old games
 
-Each game stores the full app version (`1.2.3`) and its major version, as you asked. Replays animate only for games from the **current major version**. Games from older majors stay in the list and open as the stored log, as text, because the current engine would play them out differently.
+When the engine or the balance changes, old games would replay into games that never happened, so they're deleted.
 
-That rule only works if every change to the rules bumps the major version. Two problems:
+What counts as a change is decided by a **rules fingerprint**, not the version number: play 50 fixed seeds to the end with `randomChoosers` and hash each game's score, step count and final RNG state. Any change that alters how a game plays out (a rule, a number in `config.ts`, the order dice are rolled) changes the fingerprint. Comments, refactors and log wording don't. Hashing the engine's source instead would also wipe every game on a comment edit. 50 full games take on the order of 100 ms (an estimate), and the result is computed at build time and baked into the client and server.
 
-1. **The app is on `0.0.1`.** Under "replay within a major", everything until `1.0.0` counts as one version, and the rules are still changing (`config.ts`). I'd go to `1.0.0` when this ships and bump the major on every rules change from then on.
-2. **It's easy to forget.** A rules tweak shipped as a patch would make old replays play a game that never happened, with nothing to show it. As a safety net, the build also stores a **rules hash**: a SHA-256 of `src/lib/engine/*.ts` (minus tests), computed at build and baked into both client and server. A replay animates only when the major *and* the hash match; otherwise it falls back to the stored log. The hash is about 10 lines, and it costs nothing when you remember to bump. If it proves right every time, it could replace the major-version rule later.
+A rare branch that none of the 50 games reaches could change without moving the fingerprint. Then an old replay could go wrong instead of being deleted. Raising the seed count makes that less likely. Accepting it is cheaper than requiring a version bump for every rules change.
 
-The version comes from `package.json` (the Docker build has no `.git`, so `git describe` isn't available). Release with `npm version major|minor|patch`, which bumps `package.json`, commits and creates the `vX.Y.Z` tag your Skaffold `tagPolicy` already reads, so the image tag and the stored version can't drift apart.
+- At startup, after migrations: `delete from games where fingerprint <> $current`.
+- Every query also filters by the current fingerprint. During a rolling update the old pod can still save a game for a few seconds after the new one has deleted the old ones; that row is hidden and goes at the next startup.
+- An upload from a browser tab still running the old version is refused: its fingerprint doesn't match.
+- **Dev and prod must use separate databases.** Otherwise running `skaffold dev` with a rules change would delete every production game. The plan already has `volley` and `volley_dev`. The server also refuses to start if `PGDATABASE` is `volley` while `NODE_ENV` isn't `production`.
+
+The version from `package.json` is still stored, for display only.
 
 ### Pages
 
-- `/replays`: recent games, newest first, 50 a page: date, mode (online / computer), final score, version. Games from an older major show "log only". Games you played in this browser are marked (their ids are kept in `localStorage`); there are no accounts.
+- `/replays`: recent games, newest first, 50 a page: date, mode (online / computer), final score, version. Games you played in this browser are marked (their ids are kept in `localStorage`); there are no accounts.
 - `/replay/<id>`: the court, with play/pause, step (Space) and next rally. Ids are random 10-character strings, so a link can be shared but not guessed. The list is public, but there's nothing personal in a game.
 
 ## Storage
@@ -113,33 +132,43 @@ The existing Postgres in the `db` namespace, with a database and login role just
 create table games (
   id          text primary key,           -- random, 10 chars
   mode        text not null check (mode in ('online', 'computer')),
-  version     text not null,              -- '1.2.3'
-  major       int  not null,
-  rules_hash  text not null,
+  version     text not null,              -- '1.2.3', for display
+  fingerprint text not null,              -- rules fingerprint; other values are deleted at startup
   seed        bigint not null,
   calls       jsonb not null,             -- RecordedCall[]
   score_a     int not null,
   score_b     int not null,
   winner      text not null,
-  log         jsonb not null,             -- final log, for log-only replays
   created_at  timestamptz not null default now()
 );
-create index games_recent on games (created_at desc);
+create index games_recent on games (fingerprint, created_at desc);
 ```
 
 - Client: [`postgres`](https://github.com/porsager/postgres) (small, no native build), pool of 5.
 - Migrations: numbered `.sql` files in `server/migrations/`, applied at startup inside a transaction holding a Postgres advisory lock. During a rolling update the old and new pod overlap briefly, so two processes can start at once.
-- No `DATABASE_URL` set (for example `npm run dev` with no database) → an in-memory store. Everything works and nothing is kept.
-- Games are kept indefinitely. A full game's row is roughly 20–50 KB with the log, so thousands of games is still tens of MB.
+- No `PGHOST` set (for example `npm run dev` with no database) → an in-memory store. Everything works and nothing is kept.
+- Games are kept until the rules change. Without the log, a row is a few KB.
 
 ### Connecting from the `volley` namespace
 
-A pod can only read Secrets in its own namespace, so the Deployment can't point at the Secret in `db`. Options:
+Kubernetes doesn't let a pod read a Secret from another namespace, which is why you end up copying it by hand into every app's namespace. Two ways to stop doing that:
 
-1. **Recommended: a role and Secret just for this app.** Run once against Postgres as the admin: `create role volley login password '…'; create database volley owner volley;` (and `volley_dev` for the dev namespace). Then create `volley-db` in the `volley` namespace by hand with `DATABASE_URL=postgres://volley:…@<service>.db.svc.cluster.local:5432/volley`. It isn't committed to the repo. The app can then only touch its own database.
-2. **Copy the existing Secret across** with a tool such as reflector or external-secrets, if you already run one. That's less setup, but if the existing Secret is the admin login, the app gets full access to every database on that server.
+1. **Recommended: [Reflector](https://github.com/emberstack/kubernetes-reflector).** Install it once (one Helm chart), then annotate the source Secret in `db`:
+   ```yaml
+   reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+   reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: "volley,volley-dev"
+   reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
+   ```
+   A copy appears in each listed namespace and stays in sync when the password changes. A new app means adding its namespace to that list, nothing else. There's nothing to commit in this repo.
+2. **[External Secrets Operator](https://external-secrets.io)** with its Kubernetes provider. Each app commits an `ExternalSecret` (names and keys, never the values) that pulls from `db`, and it can template the parts into a `DATABASE_URL`. It's declarative and lives in each repo, but it's more setup: the operator, a `ClusterSecretStore` and a service account allowed to read `db`'s Secrets.
 
-Pods reach the database through cluster DNS, at `<service>.db.svc.cluster.local`. If the `db` namespace has NetworkPolicies, they need to let `volley` and `volley-dev` in on 5432.
+Reflector fixes the copying with the least setup. ESO is better if you want each app's database access visible in its own repo.
+
+Either way, each app gets **the same login** if the Secret you mirror is the Postgres admin one, so every app can read and drop every other app's data. That's an accepted risk for a homelab, but the cleaner version is cheap: a role and database per app (`create role volley login password '…'; create database volley owner volley;`, plus `volley_dev`), each with its own Secret in `db`, mirrored to just that app's namespace.
+
+**No URL to assemble.** The `postgres` client reads the standard `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `PGPASSWORD` variables, so the Deployment maps each one to whatever keys the mirrored Secret has (`secretKeyRef`). The Secret doesn't need a `DATABASE_URL` key. `PGHOST` is the Service's DNS name, `<service>.db.svc.cluster.local`, not its ClusterIP: the IP changes if the Service is ever recreated, and the name doesn't.
+
+If the `db` namespace has NetworkPolicies, they need to let `volley` and `volley-dev` in on 5432.
 
 ## Server
 
@@ -179,34 +208,34 @@ The main change is in `+page.svelte`, where the page currently calls `step` itse
 There's still one image, one Deployment and one Service, and the Ingress doesn't change. Traefik passes WebSocket upgrades through without extra config.
 
 - `Dockerfile`: the build stage stays as it is. The serve stage changes from `nginx-unprivileged` to `node:26-bookworm-slim` with production dependencies plus tsx, `build/`, `server/`, `src/lib/engine/` and `src/lib/replay.ts`, `USER node` and `CMD tsx server/index.ts` on port 8080. `nginx.conf` is deleted.
-- `k8s/deployment.yaml`: `DATABASE_URL` from the `volley-db` Secret. `runAsUser` changes from 101 (nginx) to 1000 (node). Raise the memory limit from 64Mi to 128Mi: Node with tsx idles around 50–70 MB (an estimate, not measured), where nginx used a few. Keep `replicas: 1`, because rooms are in memory. The read-only root and the `/tmp` volume still work. Add a `/healthz` route for the probes that doesn't touch the database, so a database outage doesn't restart the pod. Saving fails and logs instead.
-- Dev, both `npm run dev` and `skaffold dev`: a small Vite plugin in `vite.config.ts` calls `attachSockets(server.httpServer, store)` from `configureServer`, so `/ws` works on the dev server itself. `k8s-dev` gets the same `DATABASE_URL`, from a `volley-db` Secret in `volley-dev` that points at the `volley_dev` database. Locally, leave it unset for the in-memory store, or `kubectl port-forward -n db svc/<service> 5432` and point at that. Changes to the server code need a dev server restart; Vite won't hot-reload them.
+- `k8s/deployment.yaml`: `PGHOST`, `PGDATABASE` as plain values and `PGUSER`, `PGPASSWORD` from the mirrored Secret. `runAsUser` changes from 101 (nginx) to 1000 (node). Raise the memory limit from 64Mi to 128Mi: Node with tsx idles around 50–70 MB (an estimate, not measured), where nginx used a few. Keep `replicas: 1`, because rooms are in memory. The read-only root and the `/tmp` volume still work. Add a `/healthz` route for the probes that doesn't touch the database, so a database outage doesn't restart the pod. Saving fails and logs instead.
+- Dev, both `npm run dev` and `skaffold dev`: a small Vite plugin in `vite.config.ts` calls `attachSockets(server.httpServer, store)` from `configureServer`, so `/ws` works on the dev server itself. `k8s-dev` gets the same variables with `PGDATABASE=volley_dev`. Locally, leave them unset for the in-memory store, or `kubectl port-forward -n db svc/<service> 5432` and point at a local dev database. Changes to the server code need a dev server restart; Vite won't hot-reload them.
 
 The cost of a single server is that any deploy, even a CSS change, restarts the process and ends games in progress. You deploy by hand from tags, so check nobody's playing first.
 
 ## Testing
 
-- `src/lib/replay.test.ts`: for 200 seeds, play a game where each call is randomly made by the player or the computer, record it, replay it, and check the final state matches exactly. Also check that a tampered computer call is caught, and that a mismatched hash or major falls back to the log.
-- `server/room.test.ts` (Vitest, no sockets) with a fixed seed: create and join, the third person is refused, a call out of turn or from the wrong team is ignored, a lone call gets only `locked` to the opponent (never the call's contents), both calls give the same chain as `step` with those calls plus the auto phases, `rngState` and `seed` are never in anything sent, resume gives the seat back, rematch needs both, and game over saves a record that replays to the same game.
-- Upload route: a valid record is stored with the server's own score, and a game that doesn't finish, a bad computer call, an oversized body or a wrong hash are refused.
+- `src/lib/replay.test.ts`: for 200 seeds, play a game where each call is randomly made by the player or the computer, record it, replay it, and check the final state matches exactly. Also check that a tampered computer call is caught, and that the fingerprint is stable across runs and changes when a number in `config.ts` changes.
+- `server/room.test.ts` (Vitest, no sockets) with a fixed seed: create and join, the third person is refused, a call out of turn or from the wrong team is ignored, a lone call gets only `locked` to the opponent (never the call's contents), both calls give the same chain as `step` with those calls plus the auto phases, `rngState` and `seed` are never in anything sent, resume gives the seat back, rematch needs both, and game over saves a record that replays to the same game. Clock: it starts after the chain's playback time, a timed-out call is made by the computer and replays exactly, a late call after a timeout is ignored, a lone lock-in stops only that side's clock, and the clocks stop with both players away.
+- Upload route: a valid record is stored with the server's own score, and a game that doesn't finish, a bad computer call, an oversized body or an old fingerprint are refused.
 - One integration test: start an `http` server on port 0 with `attachSockets` and the in-memory store, connect two `ws` clients and play a rally. Check that an upgrade on another path isn't taken.
-- The Postgres store and migrations run against `TEST_DATABASE_URL` when it's set, and are skipped otherwise.
+- The Postgres store, migrations and the startup delete run against a test database when `TEST_PGHOST` is set, and are skipped otherwise.
 - By hand: two browser windows locally, then a phone on mobile data against the dev deploy, locking the screen partway through a rally.
 
 ## Build order
 
-1. `src/lib/replay.ts` and its tests, plus the rules hash. That's the riskiest part, and it needs no server.
-2. `server/room.ts` + tests (the rules, with no networking).
+1. `src/lib/replay.ts` and its tests, plus the rules fingerprint. That's the riskiest part, and it needs no server.
+2. `server/room.ts` + tests (the rules and the clock, with no networking). Move the timing constants to `timing.ts`.
 3. Switch to `adapter-node`. The store, migrations and the `/api/games` routes, against the in-memory store first.
 4. `server/sockets.ts`, the Vite plugin, and the integration test.
 5. The driver split and `playChain` in the page, with single player checked to still work exactly as before. Upload games against the computer at game over.
-6. The lobby UI, `socketDriver`, waiting and serve states, and You/Them labels.
+6. The lobby UI, `socketDriver`, waiting and serve states, the clocks, and You/Them labels.
 7. The replay pages.
 8. Reconnecting.
-9. Database role and Secrets, `server/index.ts`, the Dockerfile and deployment changes. Deploy to `volley-dev` first, then `npm version major` to `1.0.0` and `skaffold run`.
+9. Reflector (or ESO) and the databases, `server/index.ts`, the Dockerfile and deployment changes. Deploy to `volley-dev` first, then `skaffold run`.
 
 ## Open questions
 
-- **The Postgres service name and Secret.** Which Service in `db` is it, and is there already a tool for copying Secrets between namespaces?
-- **Turn timers.** If one player walks away, the game waits forever. Leave it for v1 (it's two friends) or auto-lock a random call after, say, 20 s?
+- **The Postgres Service and Secret.** The Service's name in `db`, and the key names in the Secret (they vary: the Bitnami chart uses `postgres-password`, CloudNativePG uses `username` / `password`). Which Postgres is it?
+- **What a timeout picks.** The computer picks at random, as asked. If you'd rather it used what the player had highlighted but not locked in, the client would send its current pick to the server as it changes (never passed on to the opponent). That's one more message type.
 - **Who's A and B.** The creator is A for now. Rematch swaps sides so the serve alternates.
