@@ -8,7 +8,7 @@ import { stepEntries } from './story';
 /**
  * The numbers behind the latest attack, for the score panel: what the attack added up to, and
  * what the block and dig put against it. The panel shows the totals; the terms are the breakdown
- * shown on hover, with a fuller explanation of each when "Full maths" is on.
+ * shown on hover, with a fuller explanation of each when "See details" is on.
  */
 
 export interface Term {
@@ -16,11 +16,11 @@ export interface Term {
 	value: string;
 	/** A short line under the row, always shown. */
 	note?: string;
-	/** The full explanation, shown only with "Full maths" on. */
+	/** The full explanation, shown only with "See details" on. */
 	tip?: string;
 	/** Smaller rows that add up to this one. */
 	parts?: Term[];
-	/** The possible outcomes as a small table, shown with "Full maths" on; `on` marks the one that happened. */
+	/** The possible outcomes as a small table, shown with "See details" on; `on` marks the one that happened. */
 	scale?: ScaleRow[];
 }
 
@@ -36,7 +36,7 @@ export interface Score {
 	terms: Term[];
 	/** Null until the dice are rolled. */
 	total: number | null;
-	/** What the total means, in a few words. */
+	/** What the total means, in a few words, if there's anything to say. */
 	totalNote: string;
 	verdict?: string;
 }
@@ -46,9 +46,9 @@ export interface ScoreSheet {
 	attack: Score;
 	/** What the set adds to the hit: its quality, plus the setter's share on a hard shot. */
 	setBonus: number;
-	/** How the attack was built, in grade words: the first touch, then the set. */
+	/** How the attack was built: the first touch, then the set, each in grade words with its bonus. */
 	setup: [string, string];
-	/** Where the attack landed, and the sum and outcome table behind it for "Full maths". */
+	/** Where the attack landed and the sum behind it, with the outcome table for "See details". */
 	aim: { total: number; result: string; terms: Term[]; scale: ScaleRow[] } | null;
 	block: Score | null;
 	/** Why there was no block roll, e.g. the shot went around it. */
@@ -97,10 +97,10 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 		shot === 'tip'
 			? { ...setQuality, label: `${grade} set`, tip: `A tip gets only the set quality, not the setter. ${setQuality.tip}` }
 			: {
-					label: `${grade} set`,
+					label: 'Set + setter',
 					value: signed(setBonus),
 					parts: [
-						setQuality,
+						{ ...setQuality, label: `${grade} set` },
 						{
 							label: `Setter: ½ (${setter.name}'s base attack ${setter.attack} + set roll ${a.setDie})`,
 							value: signed(share),
@@ -114,11 +114,12 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 		team: a.team,
 		terms,
 		total: hit ? (a.incoming ?? null) : null,
-		totalNote: 'A covering dig is about 10'
+		totalNote: ''
 	};
 
 	const accuracy = data('accuracy');
 	const FIRST: Record<typeof a.source, string> = { free: 'pass', dig: 'dig', touch: 'block touch' };
+	const firstWord = a.source === 'touch' ? 'Block touch' : `${touchGrade(a.firstMod)} ${FIRST[a.source]}`;
 	const aim =
 		accuracy && a.accuracy !== undefined
 			? {
@@ -126,8 +127,8 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 					result: String(accuracy.result),
 					terms: [
 						{ label: 'Aim roll', value: `${die('aim') ?? '?'}` },
-						{ label: `${FIRST[a.source][0].toUpperCase()}${FIRST[a.source].slice(1)} bonus`, value: signed(a.firstMod) },
-						{ label: 'Set quality', value: signed(a.setMod) },
+						{ label: firstWord, value: signed(a.firstMod) },
+						{ label: `${grade} set`, value: signed(a.setMod) },
 						{ label: `${setter.name}'s base attack`, value: `${setter.attack}` }
 					],
 					scale: [
@@ -138,14 +139,20 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 					].map(({ result, ...r }) => ({ ...r, on: result === accuracy.result }))
 				}
 			: null;
+	// What the defence needs to stop it, in plain numbers. A tip, or a shot around the block, only meets the dig.
+	if (attack.total !== null && shot) {
+		const t = attack.total;
+		const blockable = shot !== 'tip' && (shot === a.calls!.block || aim?.result === 'block');
+		attack.totalNote =
+			aim?.result === 'easy'
+				? 'Mis-hit: an easy ball over'
+				: `Dig ${t}+ to keep it up${blockable ? ` · block ${t + config.blockMargin}+ to stuff it` : ''}`;
+	}
 	if (swing) attack.verdict = Number(swing.die) === 6 ? 'Perfect hit' : 'Error';
 	else if (hit && attack.total !== null && shot) {
 		attack.verdict = `${hitGrade(attack.total, shot, aim?.result === 'easy')} ${shot === 'tip' ? 'tip' : 'hit'}`;
 	}
-	const setup: [string, string] = [
-		a.source === 'touch' ? 'Block touch' : `${touchGrade(a.firstMod)} ${FIRST[a.source]}`,
-		`${setGrade(a.setMod)} set`
-	];
+	const setup: [string, string] = [`${firstWord} (${signed(a.firstMod)})`, `${grade} set (${signed(a.setMod)})`];
 
 	const defending = g.teams[other(a.team)];
 	let block: Score | null = null;
@@ -160,10 +167,17 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 			terms: [
 				{ label: `${b.name}'s base defence`, value: `${b.defense}` },
 				{ label: 'Roll', value: `${die('block') ?? '?'}` },
-				{ label: 'In the way', value: `+${config.blockBonus}`, tip: 'For blocking the channel the shot went down.' }
+				{
+					label: 'In the way',
+					value: `+${config.blockBonus}`,
+					tip:
+						shot === a.calls?.block
+							? 'For blocking the channel the shot went down.'
+							: 'The shot was aimed so badly it went straight into the block.'
+				}
 			],
 			total: Number(blocked.total),
-			totalNote: `Beat ${blocked.attack} by ${config.blockMargin} to stuff it, get within ${config.blockMargin - 1} to touch it`,
+			totalNote: `${Number(blocked.attack) + config.blockMargin}+ stuffs it · ${Number(blocked.attack) - config.blockMargin + 1} to ${Number(blocked.attack) + config.blockMargin - 1} gets a touch`,
 			verdict: verdicts[String(blocked.result)]
 		};
 	} else if (hit && a.calls) {
@@ -209,9 +223,19 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 	return { shot, attack, setBonus, setup, aim, block, blockNote, note, dig };
 }
 
-const AIM: Record<string, string> = { exact: 'on target', drift: 'drifts a zone', block: 'into the block', easy: 'easy ball over' };
+const AIM: Record<string, string> = {
+	exact: 'on target',
+	drift: 'drifted a zone',
+	block: 'straight into the block',
+	easy: 'mis-hit, easy ball over'
+};
 
-/** The set's bonus and where the ball went. Before the shot is called it's what a hard hit would get. */
-export const setLine = (s: ScoreSheet) =>
-	(s.shot === 'tip' ? `${signed(s.setBonus)} to the tip` : `${signed(s.setBonus)} to ${s.shot ? 'the' : 'a hard'} hit`) +
-	(s.aim ? ` · ${AIM[s.aim.result]}` : '');
+/**
+ * The line under the setup. Once the ball is hit it's where the aim sent it; before that, what the
+ * set adds to the hit (a hard hit, if the shot isn't called yet). Tips don't get the setter's share.
+ */
+export function setLine(s: ScoreSheet): string {
+	if (s.aim) return `Aim ${s.aim.total} · ${AIM[s.aim.result]}`;
+	if (s.shot === 'tip') return `Set: ${signed(s.setBonus)} to the tip`;
+	return `Set + setter: ${signed(s.setBonus)} to ${s.shot ? 'the' : 'a hard'} hit`;
+}

@@ -229,11 +229,11 @@ describe('playerActions', () => {
 		});
 	});
 
-	it('shows a beaten block and a dig that comes too late', () => {
+	it('plays a beaten block and a dig that comes too late without a label', () => {
 		// block 8 vs 14 → through, dig 7 vs 14 → kill
 		expect(playerActions(run(4, line, [4, 4, 6, 4, 1, 6]))).toMatchObject({
-			'B-blocker': { move: 'block', label: 'beaten' },
-			'B-defender': { move: 'dive', label: 'too late' }
+			'B-blocker': { move: 'block', label: '' },
+			'B-defender': { move: 'dive', label: '' }
 		});
 	});
 
