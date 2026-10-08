@@ -3,6 +3,7 @@
 	import type { Channel, Game, Shot, Stance, TeamId } from '#lib/engine/types.ts';
 	import Controls from './Controls.svelte';
 	import Court from './Court.svelte';
+	import RallyHistory from './RallyHistory.svelte';
 	import Rules from './Rules.svelte';
 	import ScoreLine from './ScoreLine.svelte';
 	import ScorePanel from './ScorePanel.svelte';
@@ -259,7 +260,7 @@
 
 <svelte:window {onkeydown} />
 
-<!-- --chrome-h is roughly the top bar plus the dock (and the scoreline when narrow), so the court fills the rest of the screen. -->
+<!-- --chrome-h is roughly the top bar plus the dock (and the rally history and scoreline when narrow), so the court fills the rest of the screen. -->
 <!-- With a banner and clocks (online), the court may shrink as far as it does on a phone, so the controls still fit a laptop screen. -->
 <main style:--extra-h="{bannerH + dockH}px" style:--court-min={bannerH + dockH ? '200px' : undefined}>
 	<TopBar game={view} {you} {names} {debugOpen} onhelp={() => rules.toggle()} {ondebug} />
@@ -276,6 +277,7 @@
 				onshot={choosing ? choose : null}
 				onpreview={(s) => (preview = s)}
 			/>
+			<RallyHistory game={view} />
 			<ScoreLine {sheet} bind:this={scoreLine} />
 			{#if dock}<div bind:clientHeight={dockH}>{@render dock()}</div>{/if}
 			<Controls
@@ -322,7 +324,7 @@
 	/* Narrower, the court takes the full width and a one-row scoreline under it stands in for the panel. */
 	@media (max-width: 860px) {
 		main {
-			--chrome-h: calc(290px + var(--extra-h));
+			--chrome-h: calc(338px + var(--extra-h));
 		}
 		.play {
 			grid-template-columns: minmax(0, 1fr);
@@ -335,7 +337,7 @@
 	   let the court shrink further rather than push the controls off the screen. */
 	@media (max-width: 600px) {
 		main {
-			--chrome-h: calc(276px + var(--extra-h));
+			--chrome-h: calc(324px + var(--extra-h));
 			--court-min: 200px;
 		}
 	}

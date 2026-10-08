@@ -9,10 +9,15 @@
 	/** How one score adds up. Colours follow the text, so it reads on the dark hover card and the light phone sheet. */
 	let { kind, score, sheet }: { kind: ScoreKind; score: Score; sheet: ScoreSheet } = $props();
 
-	const TOTAL_TIP = {
-		attack: 'What the block and the dig have to beat.',
+	const TOTAL_TIP: Partial<Record<ScoreKind, string>> = {
 		block: 'Beat the attack by 3 or more to stuff it. Within 2 is a touch. Lose by 3 or more and it goes through to the dig.',
 		dig: 'Match or beat the attack to dig it up. Otherwise it’s a kill.'
+	};
+	const AIM_RESULT: Record<string, string> = {
+		exact: 'On target',
+		drift: 'Drifted a zone',
+		block: 'Into the block',
+		easy: 'Mis-hit'
 	};
 </script>
 
@@ -39,16 +44,23 @@
 <span class="row sum">
 	<span class="label">Total</span>
 	<span class="value">{score.total ?? '?'}</span>
-	<span class="note-line">{score.totalNote}</span>
-	{#if maths.full}<span class="tip">{TOTAL_TIP[kind]}</span>{/if}
+	{#if score.totalNote}<span class="note-line">{score.totalNote}</span>{/if}
+	{#if maths.full && TOTAL_TIP[kind]}<span class="tip">{TOTAL_TIP[kind]}</span>{/if}
 </span>
-{#if maths.full && kind === 'attack' && sheet.aim}
-	<span class="section">Where it lands</span>
-	{#each sheet.aim.terms as t (t.label)}{@render row(t, true)}{/each}
+<!-- The aim is a separate roll from the attack score, so it gets its own heading. It's always shown:
+     the attack card names its result, so the sum behind it should be one look away. -->
+{#if kind === 'attack' && sheet.aim}
+	<span class="aim-head">
+		<span class="aim-title">Aim</span>
+		<span class="aim-result">{AIM_RESULT[sheet.aim.result]}</span>
+		<span class="aim-total">{sheet.aim.total}</span>
+	</span>
+	<span class="note-line">Where the ball goes. It doesn’t change the attack score.</span>
+	{#each sheet.aim.terms as t (t.label)}{@render row(t)}{/each}
 	<span class="row sum">
-		<span class="label">Aim</span>
+		<span class="label">Total</span>
 		<span class="value">{sheet.aim.total}</span>
-		{@render scale(sheet.aim.scale)}
+		{#if maths.full}{@render scale(sheet.aim.scale)}{/if}
 	</span>
 {/if}
 
@@ -102,16 +114,33 @@
 		font-weight: 800;
 		background: color-mix(in srgb, currentColor 18%, transparent);
 	}
+	.aim-head {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		margin-top: 10px;
+		padding-top: 8px;
+		border-top: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+	}
+	.aim-title {
+		font-size: 0.85em;
+		font-weight: 800;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+	.aim-result {
+		margin-left: auto;
+		font-weight: 800;
+	}
+	.aim-total {
+		font-size: 1.3em;
+		font-weight: 800;
+		font-variant-numeric: tabular-nums;
+		line-height: 1;
+	}
 	.row.sum {
 		border-top: 1px solid currentColor;
 		padding-top: 4px;
 		margin-top: 2px;
-	}
-	.section {
-		margin-top: 6px;
-		font-size: 0.85em;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		opacity: 0.75;
 	}
 </style>

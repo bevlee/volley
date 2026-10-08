@@ -3,7 +3,7 @@ import { fixedChoosers } from '../engine/choosers';
 import { newGame, step } from '../engine/rally';
 import { scriptedDice } from '../engine/rng';
 import type { Calls, Game } from '../engine/types';
-import { scoreSheet } from './scores';
+import { scoreSheet, setLine } from './scores';
 
 function evenGame(): Game {
 	const g = newGame(1);
@@ -36,11 +36,14 @@ describe('scoreSheet', () => {
 		// pass 4, set 4 → +0; the setter's share is (4 + set die 4) / 2 = 4, so the set is worth +4
 		const s = scoreSheet(run(2, { shot: 'line', block: 'line', stance: 'deep' }, [4, 4]))!;
 		expect(s.attack.total).toBeNull();
+		expect(s.attack.totalNote).toBe('');
 		expect(s.attack.verdict).toBeUndefined();
-		expect(s.setup).toEqual(['Good pass', 'Good set']);
+		expect(s.setup).toEqual(['Good pass (+0)', 'Good set (+0)']);
+		expect(setLine(s)).toBe('Set + setter: +4 to a hard hit');
 		expect(s.setBonus).toBe(4);
 		expect(values(s.attack.terms)).toEqual(['4', '?', '+4']);
-		expect(s.attack.terms.map((t) => t.label)).toEqual(["A1's base attack", 'Roll', 'Good set']);
+		expect(s.attack.terms.map((t) => t.label)).toEqual(["A1's base attack", 'Roll', 'Set + setter']);
+		expect(s.attack.terms[2].parts![0].label).toBe('Good set');
 		expect(values(s.attack.terms[2].parts!)).toEqual(['+0', '+4']);
 		expect(s.attack.terms[2].parts![1].label).toBe("Setter: ½ (A2's base attack 4 + set roll 4)");
 		expect(s.block).toBeNull();
@@ -53,10 +56,14 @@ describe('scoreSheet', () => {
 		expect(values(s.attack.terms)).toEqual(['4', '2', '+4']);
 		expect(s.attack.total).toBe(10);
 		expect(s.attack.verdict).toBe('Shaky hit');
+		expect(s.attack.totalNote).toBe('Dig 10+ to keep it up · block 13+ to stuff it');
+		expect(s.block!.totalNote).toBe('13+ stuffs it · 8 to 12 gets a touch');
 		expect(s.aim?.result).toBe('exact');
 		// aim 4 + pass 0 + set 0 + A2's base attack 4 = 8
 		expect(s.aim?.total).toBe(8);
 		expect(values(s.aim!.terms)).toEqual(['4', '+0', '+0', '4']);
+		expect(s.aim!.terms.map((t) => t.label)).toEqual(['Aim roll', 'Good pass', 'Good set', "A2's base attack"]);
+		expect(setLine(s)).toBe('Aim 8 · on target');
 		expect(s.aim!.scale.filter((r) => r.on).map((r) => r.value)).toEqual(['On target']);
 		expect(s.aim!.scale.map((r) => r.label)).toEqual(['8 or more', '5 to 7', '3 to 4', '2 or less']);
 		const quality = s.attack.terms[2].parts![0];
@@ -75,6 +82,7 @@ describe('scoreSheet', () => {
 		expect(s.attack.total).toBe(10);
 		expect(s.block).toBeNull();
 		expect(s.blockNote).toBe('Blocking line, so the cross goes around');
+		expect(s.attack.totalNote).toBe('Dig 10+ to keep it up');
 		expect(values(s.dig!.terms)).toEqual(['4', '5', '+3']);
 		expect(s.dig!.terms[0].note).toBeUndefined();
 		expect(s.dig!.total).toBe(12);
@@ -90,12 +98,19 @@ describe('scoreSheet', () => {
 		expect(s.dig!.verdict).toBe('Kill');
 	});
 
+	it('names the aim on the card when a badly aimed shot goes into the block', () => {
+		// cross past a line block, aim 4 → straight into the block, block 13 vs 10 → stuff
+		const s = scoreSheet(run(4, { shot: 'cross', block: 'line', stance: 'deep' }, [4, 3, 4, 1, 6]))!;
+		expect(setLine(s)).toBe('Aim 4 · straight into the block');
+		expect(s.block!.terms[2].tip).toBe('The shot was aimed so badly it went straight into the block.');
+	});
+
 	it('notes when the attack comes off a block touch, with no pass', () => {
 		// line into the line block: block 4 + 5 + 3 = 12 vs 12 → touch; then B2 sets 4 − 1 → −1
 		const lineIntoBlock = { shot: 'line', block: 'line', stance: 'deep' } as const;
 		const s = scoreSheet(run(5, lineIntoBlock, [4, 4, 4, 4, 5, 4]))!;
 		expect(s.attack.who).toBe('B1');
-		expect(s.setup).toEqual(['Block touch', 'Shaky set']);
+		expect(s.setup).toEqual(['Block touch (−1)', 'Shaky set (−1)']);
 		expect(s.note).toBe('Off a block touch: no pass, so −1 on the set and the aim');
 		expect(scoreSheet(run(2, lineIntoBlock, [4, 4]))!.note).toBeNull();
 	});
@@ -105,6 +120,7 @@ describe('scoreSheet', () => {
 		const s = scoreSheet(run(4, { shot: 'tip', block: 'line', stance: 'deep' }, [4, 4, 2, 6, 3]))!;
 		expect(values(s.attack.terms)).toEqual(['4', '2', '+0']);
 		expect(s.attack.terms[2].parts).toBeUndefined();
+		expect(s.attack.terms[2].label).toBe('Good set');
 		expect(s.setBonus).toBe(0);
 		expect(s.attack.total).toBe(6);
 		expect(s.attack.verdict).toBe('Shaky tip');

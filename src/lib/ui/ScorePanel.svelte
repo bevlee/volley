@@ -28,20 +28,20 @@
 
 <aside class="scores" aria-label="Attack and defence scores">
 	{#if sheet}
-		{@render card('Attack', 'attack', sheet.attack, { setup: sheet.setup, set: setLine(sheet) })}
+		{@render card('Attack score', 'attack', sheet.attack, { setup: sheet.setup, set: setLine(sheet) })}
 		{#if sheet.note}<p class="note touch">{sheet.note}</p>{/if}
 		{#if sheet.block}
-			{@render card('Block', 'block', sheet.block)}
+			{@render card('Block score', 'block', sheet.block)}
 		{:else if sheet.blockNote}
 			<p class="note">{sheet.blockNote}</p>
 		{/if}
-		{#if sheet.dig}{@render card('Dig', 'dig', sheet.dig)}{/if}
+		{#if sheet.dig}{@render card('Dig score', 'dig', sheet.dig)}{/if}
 	{:else}
 		<p class="note">Attack and defence scores show here once a ball is set.</p>
 	{/if}
 	<p class="hint">
 		Hover a score to see how it adds up.
-		<label><input type="checkbox" bind:checked={maths.full} onchange={saveFullMaths} /> Full maths</label>
+		<label><input type="checkbox" bind:checked={maths.full} onchange={saveFullMaths} /> See details</label>
 	</p>
 </aside>
 
@@ -85,10 +85,11 @@
 		width: 100%;
 		font-size: 0.8rem;
 	}
+	/* Sentence case, so "Attack score", the grade and the total fit on one line in the side column. */
 	.title {
+		font-size: 0.9rem;
 		font-weight: 800;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
+		white-space: nowrap;
 		color: var(--team);
 	}
 	.who {
@@ -97,6 +98,7 @@
 	.verdict {
 		margin-left: auto;
 		font-weight: 800;
+		white-space: nowrap;
 	}
 	.total {
 		margin-left: auto;

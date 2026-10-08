@@ -189,7 +189,7 @@ export type Move = 'spike' | 'tip' | 'block' | 'dig' | 'dive';
 export interface Action {
 	/** Which animation the chip plays. */
 	move: Move;
-	/** A short word shown over the chip. */
+	/** A short word shown over the chip; empty when the move speaks for itself. */
 	label: string;
 }
 
@@ -205,13 +205,13 @@ export function playerActions(g: Game): Record<string, Action> {
 		actions[`${hit.team}-${hit.slot as Slot}`] = { move: tipped ? 'tip' : 'spike', label: tipped ? 'tip!' : 'spike!' };
 	}
 	if (block) {
-		const label = block.result === 'stuff' ? 'block!' : block.result === 'touch' ? 'block touch' : 'beaten';
+		const label = block.result === 'stuff' ? 'block!' : block.result === 'touch' ? 'block touch' : '';
 		actions[`${block.team}-blocker`] = { move: 'block', label };
 	}
 	if (dig) {
 		const stretching = (dig.shot === 'tip' && dig.stance === 'short') || Number(dig.reach) < 1;
 		const move: Move = stretching || !dig.up ? 'dive' : 'dig';
-		const label = !dig.up ? 'too late' : move === 'dive' ? 'dive!' : 'dig!';
+		const label = !dig.up ? '' : move === 'dive' ? 'dive!' : 'dig!';
 		actions[`${dig.team}-defender`] = { move, label };
 	}
 	return actions;

@@ -44,7 +44,7 @@
 			<text x={W / 2} y="32" class="stats">Atk {player.attack} · Def {player.defense}</text>
 		</g>
 	{/key}
-	{#if action}
+	{#if action?.label}
 		<text class="action" x={W / 2} y="-6">{action.label}</text>
 	{/if}
 </g>

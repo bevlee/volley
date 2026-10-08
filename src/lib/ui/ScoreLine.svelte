@@ -78,7 +78,7 @@
 				class="slot {s.team}"
 				disabled={!s.open}
 				onclick={() => show(s.kind)}
-				aria-label="{TITLE[s.kind]}{s.who ? ` ${s.who}` : ''}: {s.total}{s.verdict ? `, ${s.verdict}` : ''}. Show the maths"
+				aria-label="{TITLE[s.kind]}{s.who ? ` ${s.who}` : ''}: {s.total}{s.verdict ? `, ${s.verdict}` : ''}. Show how it adds up"
 			>
 				<span class="total">{s.total}</span>
 				<span class="text">
@@ -109,25 +109,25 @@
 		{#if sheet && current}
 			<div class="body" role="tabpanel">
 				{#if current.kind === 'attack'}
-					{@render head('Attack', sheet.attack)}
+					{@render head('Attack score', sheet.attack)}
 					<p class="setup"><b>{sheet.setup.join(' → ')}</b><br /><span>{setLine(sheet)}</span></p>
 					{#if sheet.note}<p class="note touch">{sheet.note}</p>{/if}
 					<div class="maths"><Breakdown kind="attack" score={sheet.attack} {sheet} /></div>
 				{:else if current.kind === 'block'}
 					{#if sheet.block}
-						{@render head('Block', sheet.block)}
+						{@render head('Block score', sheet.block)}
 						<div class="maths"><Breakdown kind="block" score={sheet.block} {sheet} /></div>
 					{:else}
 						<p class="note">{sheet.blockNote}</p>
 					{/if}
 				{:else if sheet.dig}
-					{@render head('Dig', sheet.dig)}
+					{@render head('Dig score', sheet.dig)}
 					<div class="maths"><Breakdown kind="dig" score={sheet.dig} {sheet} /></div>
 				{/if}
 			</div>
 		{/if}
 
-		<label class="full"><input type="checkbox" bind:checked={maths.full} onchange={saveFullMaths} /> Full maths</label>
+		<label class="full"><input type="checkbox" bind:checked={maths.full} onchange={saveFullMaths} /> See details</label>
 	</div>
 </dialog>
 
