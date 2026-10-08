@@ -40,7 +40,7 @@
 </header>
 
 <style>
-	/* One row on a phone: title, score, icons; the rally count sits under the score. */
+	/* Title, score, icons, with the rally count under the score. */
 	.bar {
 		display: grid;
 		grid-template-columns: 1fr auto 1fr;
@@ -121,6 +121,22 @@
 		place-items: center;
 		font-weight: 700;
 		color: var(--muted);
+	}
+	/* One row on a phone: the rally count takes the title's place. */
+	@media (max-width: 600px) {
+		.bar {
+			grid-template-areas: 'meta score icons';
+		}
+		.title {
+			display: none;
+		}
+		.meta {
+			text-align: left;
+		}
+		.icon {
+			width: 40px;
+			height: 40px;
+		}
 	}
 	.icon.on {
 		background: var(--text);

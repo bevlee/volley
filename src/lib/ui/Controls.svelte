@@ -185,4 +185,10 @@
 		padding: 0 3px;
 		margin-left: 4px;
 	}
+	/* No keyboard on a touch screen, so no key hints. */
+	@media (hover: none) {
+		kbd {
+			display: none;
+		}
+	}
 </style>

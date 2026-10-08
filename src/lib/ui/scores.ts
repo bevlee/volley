@@ -208,3 +208,10 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 
 	return { shot, attack, setBonus, setup, aim, block, blockNote, note, dig };
 }
+
+const AIM: Record<string, string> = { exact: 'on target', drift: 'drifts a zone', block: 'into the block', easy: 'easy ball over' };
+
+/** The set's bonus and where the ball went. Before the shot is called it's what a hard hit would get. */
+export const setLine = (s: ScoreSheet) =>
+	(s.shot === 'tip' ? `${signed(s.setBonus)} to the tip` : `${signed(s.setBonus)} to ${s.shot ? 'the' : 'a hard'} hit`) +
+	(s.aim ? ` · ${AIM[s.aim.result]}` : '');

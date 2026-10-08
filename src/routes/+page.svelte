@@ -5,6 +5,7 @@
 	import Controls from '#lib/ui/Controls.svelte';
 	import DebugDrawer from '#lib/ui/DebugDrawer.svelte';
 	import Rules from '#lib/ui/Rules.svelte';
+	import ScoreLine from '#lib/ui/ScoreLine.svelte';
 	import ScorePanel from '#lib/ui/ScorePanel.svelte';
 	import { scoreSheet, type ScoreSheet } from '#lib/ui/scores.ts';
 	import { needsDefence, needsShot, nextAction, playsItself, statusLine, stepEntries } from '#lib/ui/story.ts';
@@ -59,6 +60,7 @@
 		if (next || shown.steps === 0) sheet = next;
 	});
 	let rules: Rules;
+	let scoreLine: ScoreLine;
 	/** Dice on the court. A possession's pass and set dice stay (faded) until the attack, so you can see the build-up. */
 	let dice = $state.raw<{ key: number; items: (PlacedDie & { step: number })[] }>({ key: 0, items: [] });
 	let timers: ReturnType<typeof setTimeout>[] = [];
@@ -187,8 +189,9 @@
 	/** Space or → steps, unless you're typing in the seed box or a button already has focus. */
 	function onkeydown(e: KeyboardEvent) {
 		if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+		// The phone's score sheet and the rules are modal: no game keys behind them (they close themselves on Escape).
+		if (scoreLine.isOpen()) return;
 		if (e.key === '?' || (e.key === '/' && e.shiftKey)) return rules.toggle();
-		// The rules sheet is modal: no game keys behind it (it closes itself on Escape).
 		if (rules.isOpen()) return;
 		if (e.key === 'd' || e.key === 'D') return (debugOpen = !debugOpen);
 		if (e.key === 'Escape' && debugOpen) return (debugOpen = false);
@@ -227,7 +230,7 @@
 	<title>Volley</title>
 </svelte:head>
 
-<!-- --chrome-h is roughly the top bar plus the dock, so the court fills the rest of the screen. -->
+<!-- --chrome-h is roughly the top bar plus the dock (and the scoreline when narrow), so the court fills the rest of the screen. -->
 <main>
 	<TopBar game={shown} {debugOpen} onhelp={() => rules.toggle()} ondebug={() => (debugOpen = !debugOpen)} />
 	<div class="play">
@@ -242,6 +245,7 @@
 				onshot={choosing ? choose : null}
 				onpreview={(s) => (preview = s)}
 			/>
+			<ScoreLine {sheet} bind:this={scoreLine} />
 			<Controls
 				status={statusLine(shown, controlled)}
 				{choosing}
@@ -293,13 +297,24 @@
 	.side {
 		padding-top: 8px;
 	}
-	/* On a phone the scores drop below the dock. */
+	/* Narrower, the court takes the full width and a one-row scoreline under it stands in for the panel. */
 	@media (max-width: 860px) {
+		main {
+			--chrome-h: 290px;
+		}
 		.play {
 			grid-template-columns: minmax(0, 1fr);
 		}
 		.side {
-			grid-row: 2;
+			display: none;
+		}
+	}
+	/* The top bar fits in one row on a phone. With the browser's bars showing, a phone can be short:
+	   let the court shrink further rather than push the controls off the screen. */
+	@media (max-width: 600px) {
+		main {
+			--chrome-h: 276px;
+			--court-min: 200px;
 		}
 	}
 </style>

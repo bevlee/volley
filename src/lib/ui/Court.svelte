@@ -357,7 +357,7 @@
 		/* Size the stage to the court so callouts scale with it. Tall enough to fill a laptop
 		   screen below the header without scrolling: height = width × 560 / 300. */
 		container-type: inline-size;
-		max-width: max(260px, calc((100dvh - var(--chrome-h, 220px)) * 300 / 560));
+		max-width: max(var(--court-min, 260px), calc((100dvh - var(--chrome-h, 220px)) * 300 / 560));
 		margin: 0 auto;
 	}
 	.shaking {
