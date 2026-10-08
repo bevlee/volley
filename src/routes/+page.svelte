@@ -10,7 +10,7 @@
 	import { scoreSheet, type ScoreSheet } from '#lib/ui/scores.ts';
 	import { needsDefence, needsShot, nextAction, playsItself, statusLine, stepEntries } from '#lib/ui/story.ts';
 	import Court from '#lib/ui/Court.svelte';
-	import { ROLL_MS } from '#lib/ui/Die.svelte';
+	import { MOVE_MS, RESOLVE_MS, pauseAfter } from '#lib/ui/timing.ts';
 	import {
 		ballAt,
 		placeDice,
@@ -24,14 +24,6 @@
 	import TopBar from '#lib/ui/TopBar.svelte';
 
 	const randomSeed = () => Math.floor(Math.random() * 1_000_000);
-	/** Time for a player to run to where they roll (matches the chip tween). */
-	const MOVE_MS = 400;
-	/** Pause after the dice land before the step's result is shown. */
-	const RESOLVE_MS = ROLL_MS + 150;
-	/** Pauses between steps that play on their own: after the calls are revealed, after the attack, otherwise. */
-	const AFTER_CALLS_MS = 900;
-	const AFTER_ATTACK_MS = 1300;
-	const BETWEEN_MS = 250;
 
 	const initialSeed = randomSeed();
 	const initialGame = newGame(initialSeed);
@@ -126,9 +118,8 @@
 		while (playsItself(g)) chain.push((g = step(g)));
 		pending = chain.slice(1);
 		const next = () => {
-			const after = game.phase.kind === 'hit' ? AFTER_CALLS_MS : stepEntries(game).some((e) => e.tag === 'hit') ? AFTER_ATTACK_MS : BETWEEN_MS;
 			const following = pending.shift();
-			if (following) timers.push(setTimeout(() => show(following, true, next), after));
+			if (following) timers.push(setTimeout(() => show(following, true, next), pauseAfter(game)));
 		};
 		show(first, true, next);
 	}

@@ -1,9 +1,5 @@
-<script lang="ts" module>
-	/** How long a die tumbles before it shows its value. */
-	export const ROLL_MS = 600;
-</script>
-
 <script lang="ts">
+	import { ROLL_MS } from './timing';
 	let { value, label, x, y }: { value: number; label: string; x: number; y: number } = $props();
 
 	const SIZE = 20;

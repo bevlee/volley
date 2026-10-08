@@ -41,7 +41,9 @@ The simplest option is a server that only passes messages between the two browse
 1. **The dice can be read in advance.** `Game.rngState` is the seeded RNG state. Whoever holds it can run `step` once for each possible call and see every outcome before choosing. With the 3 shots × 4 defences, that's 12 runs, which takes well under a millisecond, so the host could always pick the best call.
 2. **Calls are made at the same time.** Under a relay, the second player to call gets the first player's call in their browser before choosing (it's readable in dev tools even if the UI hides it).
 
-So the server holds the true `Game`, runs `step` itself and sends clients copies **without `rngState` or `seed`**. The engine is plain TypeScript with relative imports (the sim script already runs it under tsx), so the server imports `src/lib/engine/` as it is.
+So the server holds the true `Game`, runs `step` itself and sends clients copies **without `rngState` or `seed`**.
+
+**This raises the bar, but doesn't stop a determined cheater.** The engine's RNG, mulberry32, has only 32 bits of state, so every possible game can be tried. Checking all 2³¹ seeds against the player stats shown at the start takes about 25 minutes on one core with naive code (measured: 20 million seeds in 14 s), and a few minutes across several cores. The first few dice then pin down the exact seed, and from there every die to come. Fixing it means an RNG with more state (sfc32 or xoshiro128\*\*, 128 bits), which changes every seed's game. Now is the cheapest time to do that, while there are no saved games. Leaving it is reasonable between friends. The engine is plain TypeScript with relative imports (the sim script already runs it under tsx), so the server imports `src/lib/engine/` as it is.
 
 ## Flow
 
@@ -62,7 +64,8 @@ Online games only. Single player against the computer has no clock.
 - **On screen, for both players:** a bar that drains, with the seconds, under the status line. At the call there are two clocks, "Your call 14" and "Their call 14". When a side locks in, its clock disappears on both screens. The last 5 seconds are red.
 - **When it runs out:** the computer makes the missing part with `randomChoosers`, recorded as `byComputer`. It replays exactly as a computer call does (see [Replays](#replays)). A serve that times out is served automatically. Both screens show "Time's up, the computer called for Team B" in the status line and log.
 - **Away players:** the clock keeps running for a player who has disconnected, so the game goes on with the computer playing their side. A phone that locks for a minute comes back a few points later. If **both** players are away, the clocks stop until one reconnects; the room expiry tidies up after that.
-- In `server/room.ts` the time is passed in (`handle(room, team, msg, now)`, `tick(room, now)`), so tests use fake time and the socket layer owns the one real `setTimeout` per room.
+- In `src/lib/server/room.ts` the time is passed in (`act(room, team, msg, now)`, `tick(room, now)`), so tests use fake time and the socket layer owns the one real `setTimeout` per room.
+- A seat left empty mid-game stops the clock until someone joins with the code and takes it over.
 
 ## Protocol
 
@@ -74,9 +77,9 @@ Client → server (the ones marked *ack* reply through Socket.IO's acknowledgeme
 | --- | --- | --- |
 | `create` *ack* | | lobby; replies `{ code, team }` |
 | `join` *ack* | `code` | lobby; replies `{ code, team }` or `{ error }` (bad code, room full) |
-| `serve` | | your team serves, phase `serve` or `pointOver` |
-| `shot` | `shot` | you attack, phase `calls` |
-| `defence` | `block`, `stance` | you defend, phase `calls` |
+| `serve` | `at` | your team serves, phase `serve` or `pointOver` |
+| `shot` | `at`, `shot` | you attack, phase `calls` |
+| `defence` | `at`, `block`, `stance` | you defend, phase `calls` |
 | `rematch` | | `gameOver` |
 
 Server → client:
@@ -89,9 +92,12 @@ Server → client:
 | `locked` | `team` | that team has locked in a call, contents hidden |
 | `clock` | `action: 'serve' \| 'call'`, `teams: TeamId[]`, `msLeft` | who owes an action and how long they have; `teams: []` stops the clock |
 | `timedOut` | `team`, `action` | the clock ran out and the computer chose for that team |
+| `rematchAsked` | `team` | that team wants a rematch |
 | `saved` | `id` | the game is over and saved; the replay is at `/replay/<id>` |
 
-`PublicGame = Omit<Game, 'rngState' | 'seed'>`. The server ignores anything sent out of turn or with values that aren't valid (a shot that's not `line | cross | tip`, a defence from the attacking team, a second call). It never trusts the client's idea of the phase.
+`at` is the step count of the state the player is acting on. Without it, a call that arrived just after its clock ran out could land on the *next* call instead.
+
+Games are sent with `seed` and `rngState` set to 0, so the client keeps using the `Game` type. The server ignores anything sent out of turn or with values that aren't valid (a shot that's not `line | cross | tip`, a defence from the attacking team, a second call). It never trusts the client's idea of the phase.
 
 ## Replays
 
@@ -212,11 +218,11 @@ SvelteKit switches from `adapter-static` to `adapter-node`. The adapter builds a
 - `src/lib/server/store.ts`: the `GameStore` interface (`save`, `get`, `recent`) with Postgres and in-memory versions.
 - `src/lib/engine/replay.ts`: recording, replaying and the rules fingerprint. Done.
 - `src/routes/api/games/+server.ts`: `POST` (upload a computer game) and `GET ?player=` (your history). `src/routes/api/games/[id]/+server.ts`: `GET` one.
-- `server/room.ts`: pure room logic, with no sockets. `Room { code, game, seats: {A, B}, pending: {shot?, defence?}, calls: RecordedCall[], rematch: Set<TeamId>, lastActive }`, plus `handle(room, team, msg) → { send, broadcast, save? }`. All the turn rules live here, so they can be unit tested.
+- `src/lib/server/room.ts` (done): pure room logic, with no sockets. `act`, `tick`, `join`, `connect`, `disconnect` and `leave` each change the room and return what to send to which team, plus a `save` at game over. All the turn rules live here, so they're unit tested. It's under `src/lib/server` so SvelteKit stops browser code from importing it, and it uses relative imports so tsx can run it.
 - `server/sockets.ts`: `attachSockets(httpServer, store)` creates the Socket.IO `Server` with `connectionStateRecovery` on. Socket.IO only takes requests under `/socket.io/`, so in dev it sits next to Vite's own hot-reload socket on the same server without clashing. It maps `playerId`s to seats, puts each room's sockets in a Socket.IO room for broadcasts, owns the one clock timer per room, and runs the cleanup.
 - `server/index.ts`: the production entry. A `node:http` server on 8080 that runs migrations, mounts `build/handler.js` and calls `attachSockets`.
 - Room codes: 4 letters from `BCDFGHJKLMNPQRSTVWXZ`, checked for clashes. That's consonants only, so codes can't spell words, and leaving out I and O avoids mixing them up with 1 and 0. 20 letters give 20⁴ = 160k codes, which is enough for a handful of rooms at once.
-- Seeds come from `crypto.randomInt`.
+- Seeds come from `crypto.getRandomValues` (Web Crypto, so no Node types are needed).
 - Rooms are deleted after 30 minutes with nobody connected, or 2 hours without a move.
 - Run with `tsx server/index.ts`. The engine imports files without extensions (`'./rules'`), which Node's own loader won't resolve, so the socket side needs tsx.
 
@@ -258,7 +264,7 @@ The cost of a single server is that any deploy, even a CSS change, restarts the 
 ## Testing
 
 - `src/lib/engine/replay.test.ts` (done): for 200 seeds, play a game where each call is randomly made by the player or the computer, record it, replay it, and check the final state matches exactly. Also check that a tampered computer call is caught, and that the fingerprint is stable across runs and changes when a number in `config.ts` changes.
-- `server/room.test.ts` (Vitest, no sockets) with a fixed seed: create and join, the third person is refused, a call out of turn or from the wrong team is ignored, a lone call gets only `locked` to the opponent (never the call's contents), both calls give the same chain as `step` with those calls plus the auto phases, `rngState` and `seed` are never in anything sent, connecting again with the same `playerId` gives the seat back, rematch needs both, and game over saves a record that replays to the same game. Clock: it starts after the chain's playback time, a timed-out call is made by the computer and replays exactly, a late call after a timeout is ignored, a lone lock-in stops only that side's clock, and the clocks stop with both players away.
+- `src/lib/server/room.test.ts` (done; Vitest, no sockets) with a fixed seed: create and join, the third person is refused, a call out of turn or from the wrong team is ignored, a lone call gets only `locked` to the opponent (never the call's contents), both calls give the same chain as `step` with those calls plus the auto phases, `rngState` and `seed` are never in anything sent, connecting again with the same `playerId` gives the seat back, rematch needs both, and game over saves a record that replays to the same game. Clock: it starts after the chain's playback time, a timed-out call is made by the computer and replays exactly, a late call after a timeout is ignored, a lone lock-in stops only that side's clock, and the clocks stop with both players away.
 - Upload route: a valid record is stored with the server's own score, and a game that doesn't finish, a bad computer call, an oversized body or an old fingerprint are refused.
 - One integration test: start an `http` server on port 0 with `attachSockets` and the in-memory store, connect two `socket.io-client` clients and play a rally. Drop one mid-rally and check it gets the missed chain (short drop) or a snapshot (long drop).
 - The Postgres store, migrations and the startup delete run against a test database when `TEST_PGHOST` is set, and are skipped otherwise.
@@ -267,7 +273,7 @@ The cost of a single server is that any deploy, even a CSS change, restarts the 
 ## Build order
 
 1. ~~`src/lib/engine/replay.ts` and its tests, plus the rules fingerprint.~~ Done. That's the riskiest part, and it needs no server.
-2. `server/room.ts` + tests (the rules and the clock, with no networking). Move the timing constants to `timing.ts`.
+2. ~~`src/lib/server/room.ts` + tests (the rules and the clock, with no networking). Move the timing constants to `timing.ts`.~~ Done.
 3. Switch to `adapter-node`. The store, migrations and the `/api/games` routes, against the in-memory store first.
 4. `server/sockets.ts`, the Vite plugin, and the integration test.
 5. The driver split and `playChain` in the page, with single player checked to still work exactly as before. Upload games against the computer at game over.
