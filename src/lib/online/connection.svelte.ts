@@ -1,6 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import type { Channel, Game, Shot, Stance, TeamId } from '../engine/types';
-import type { Action, ClockView, Presence, ToClient } from './protocol';
+import { cleanName } from './names';
+import type { Action, ClockView, Names, Presence, ToClient } from './protocol';
 
 /**
  * The browser's side of an online game: one Socket.IO connection, what the server has said, and
@@ -8,6 +9,7 @@ import type { Action, ClockView, Presence, ToClient } from './protocol';
  */
 
 const PLAYER_KEY = 'volley.playerId';
+const NAME_KEY = 'volley.name';
 
 /**
  * This browser's player id, made on first use. It's the key to the player's seat and history, so
@@ -22,6 +24,23 @@ export function playerId(): string {
 		return id;
 	} catch {
 		return crypto.randomUUID();
+	}
+}
+
+/** The name this browser last played under, or '' if it's never had one. */
+function savedName(): string {
+	try {
+		return cleanName(localStorage.getItem(NAME_KEY) ?? '');
+	} catch {
+		return '';
+	}
+}
+
+function saveName(name: string) {
+	try {
+		localStorage.setItem(NAME_KEY, name);
+	} catch {
+		// Blocked storage: the name lasts as long as the page.
 	}
 }
 
@@ -51,6 +70,10 @@ export class Online {
 	code = $state<string | null>(null);
 	team = $state<TeamId | null>(null);
 	opponent = $state<Presence>('waiting');
+	/** This player's name: asked for once, then remembered in this browser. */
+	name = $state(savedName());
+	/** Both players' names in the current room. */
+	names = $state<Names>({ A: null, B: null });
 	clock = $state.raw<Clock | null>(null);
 	/** The teams that have locked in their part of the current call. */
 	locked = $state<TeamId[]>([]);
@@ -81,6 +104,7 @@ export class Online {
 			this.code = m.code;
 			this.team = m.team;
 			this.opponent = m.opponent;
+			this.names = m.names;
 			this.locked = m.locked;
 			this.rematch = [];
 			this.setClock(m.clock);
@@ -94,6 +118,7 @@ export class Online {
 			this.handlers.chain(m.chain);
 		});
 		on('presence', (m) => (this.opponent = m.opponent));
+		on('names', (m) => (this.names = m.names));
 		on('locked', (m) => {
 			if (!this.locked.includes(m.team)) this.locked.push(m.team);
 		});
@@ -112,6 +137,7 @@ export class Online {
 		this.stage = 'menu';
 		this.code = this.team = this.latest = this.clock = null;
 		this.opponent = 'waiting';
+		this.names = { A: null, B: null };
 		this.locked = [];
 		this.rematch = [];
 	}
@@ -120,18 +146,33 @@ export class Online {
 		return new Promise((resolve) => this.socket.emit(event, ...args, resolve));
 	}
 
-	/** Makes a room; the page then waits for an opponent. */
-	async create() {
-		const { code, team } = await this.ask<{ code: string; team: TeamId }>('create');
-		this.code = code;
-		this.team = team;
-		this.stage = 'waiting';
+	/**
+	 * Sets the player's name and remembers it. In a room, both players see the change straight away;
+	 * nothing else depends on the name. Returns false for a name that cleans to nothing.
+	 */
+	rename(raw: string): boolean {
+		const name = cleanName(raw);
+		if (!name) return false;
+		this.name = name;
+		saveName(name);
+		if (this.team) this.socket.emit('rename', { name });
+		return true;
 	}
 
-	/** Joins a room by code. 'missing' is a code with no room; 'full' a room with two players. */
-	async join(code: string): Promise<'ok' | 'missing' | 'full'> {
-		const reply = await this.ask<{ code: string; team: TeamId } | { error: string }>('join', code);
-		if ('error' in reply) return /full/i.test(reply.error) ? 'full' : 'missing';
+	/** Makes a room; the page then waits for an opponent. Needs a name first. */
+	async create(): Promise<'ok' | 'noname'> {
+		const reply = await this.ask<{ code: string; team: TeamId } | { error: string }>('create', this.name);
+		if ('error' in reply) return 'noname';
+		this.code = reply.code;
+		this.team = reply.team;
+		this.stage = 'waiting';
+		return 'ok';
+	}
+
+	/** Joins a room by code. 'missing' is a code with no room; 'full' a room with two players. Needs a name first. */
+	async join(code: string): Promise<'ok' | 'missing' | 'full' | 'noname'> {
+		const reply = await this.ask<{ code: string; team: TeamId } | { error: string }>('join', code, this.name);
+		if ('error' in reply) return /full/i.test(reply.error) ? 'full' : /name/i.test(reply.error) ? 'noname' : 'missing';
 		this.code = reply.code;
 		this.team = reply.team;
 		return 'ok';

@@ -27,8 +27,8 @@ import { isCode, normaliseCode } from '../online/codes';
 
 /** A room with both players in: A is p1, B is p2. The clock is on B's serve. */
 function seated(seed = 42): Room {
-	const room = createRoom('KXQT', 'p1', seed, 0);
-	join(room, 'p2', 0);
+	const room = createRoom('KXQT', 'p1', 'Bev', seed, 0);
+	join(room, 'p2', 'Sam', 0);
 	return room;
 }
 
@@ -72,17 +72,17 @@ describe('rooms', () => {
 	});
 
 	it('seats the creator as A and the joiner as B, and refuses a third player', () => {
-		const room = createRoom('KXQT', 'p1', 42, 0);
-		const joined = join(room, 'p2', 5);
+		const room = createRoom('KXQT', 'p1', 'Bev', 42, 0);
+		const joined = join(room, 'p2', 'Sam', 5);
 		expect(joined).toMatchObject({ team: 'B' });
 		expect(events((joined as { send: Send[] }).send)).toEqual(['B:snapshot', 'A:snapshot']);
-		expect(join(room, 'p3', 6)).toEqual({ error: 'That room is full' });
+		expect(join(room, 'p3', 'Cy', 6)).toEqual({ error: 'That room is full' });
 	});
 
 	it('gives a returning player their own seat back', () => {
 		const room = seated();
 		disconnect(room, 'A', 10);
-		const back = join(room, 'p1', 20);
+		const back = join(room, 'p1', 'Bev', 20);
 		expect(back).toMatchObject({ team: 'A' });
 		expect(room.seats.A!.connected).toBe(true);
 	});
@@ -90,17 +90,45 @@ describe('rooms', () => {
 	it('starts the clock on B serving once both are in', () => {
 		const room = seated();
 		expect(room.clock).toEqual({ action: 'serve', teams: ['B'], deadline: CLOCK_MS });
-		expect(createRoom('KXQT', 'p1', 1, 0).clock).toBeNull();
+		expect(createRoom('KXQT', 'p1', 'Bev', 1, 0).clock).toBeNull();
 	});
 
 	it('never sends the seed or the RNG state', () => {
 		const room = seated();
-		const sends: Send[] = [...(join(room, 'p2', 0) as { send: Send[] }).send];
+		const sends: Send[] = [...(join(room, 'p2', 'Sam', 0) as { send: Send[] }).send];
 		const { outcomes } = runOut(room);
 		sends.push(...outcomes.flatMap((o) => o.send));
 		const games = gamesIn(sends);
 		expect(games.length).toBeGreaterThan(100);
 		expect(games.every((g) => g.seed === 0 && g.rngState === 0)).toBe(true);
+	});
+});
+
+describe('names', () => {
+	it('are in the snapshot, change at any time, and ignore names that clean to nothing', () => {
+		const room = seated();
+		const r = act(room, 'B', { type: 'rename', name: '  Sammy\u0007  ' }, 5);
+		expect(msgs(r.send, 'names')).toEqual([
+			{ event: 'names', names: { A: 'Bev', B: 'Sammy' } },
+			{ event: 'names', names: { A: 'Bev', B: 'Sammy' } }
+		]);
+		expect(act(room, 'B', { type: 'rename', name: '   ' }, 6).send).toEqual([]);
+		expect(act(room, 'B', { type: 'rename', name: 'Sammy' }, 7).send).toEqual([]);
+		expect(room.seats.B!.name).toBe('Sammy');
+	});
+
+	it('can be changed before anyone has joined', () => {
+		const room = createRoom('KXQT', 'p1', 'Bev', 1, 0);
+		expect(act(room, 'A', { type: 'rename', name: 'Bevan' }, 1).send).toHaveLength(2);
+		expect(room.seats.A!.name).toBe('Bevan');
+	});
+
+	it('go with the players when they swap teams for a rematch', () => {
+		const room = seated();
+		runOut(room);
+		act(room, 'A', { type: 'rematch' }, 1);
+		const r = act(room, 'B', { type: 'rematch' }, 2, () => 99);
+		expect(msgs(r.send, 'snapshot')[0].names).toEqual({ A: 'Sam', B: 'Bev' });
 	});
 });
 
@@ -229,7 +257,7 @@ describe('the clock', () => {
 		const sends = leave(room, A, 5000);
 		expect(msgs(sends, 'presence')).toEqual([{ event: 'presence', opponent: 'waiting' }]);
 		expect(tick(room, 10_000_000)).toEqual({ send: [] });
-		expect(join(room, 'p3', 10_000_000)).toMatchObject({ team: A });
+		expect(join(room, 'p3', 'Cy', 10_000_000)).toMatchObject({ team: A });
 		expect(room.clock!.pausedLeft).toBeUndefined();
 		expect(room.game.phase.kind).toBe('calls');
 	});
@@ -253,6 +281,7 @@ describe('game over', () => {
 		}
 		expect(save).toBeDefined();
 		expect(save!.players).toEqual({ A: 'p1', B: 'p2' });
+		expect(save!.names).toEqual({ A: 'Bev', B: 'Sam' });
 		expect(save!.score).toEqual(room.game.score);
 		expect(save!.record.calls.some((c) => !c.byComputer.shot)).toBe(true);
 		expect(save!.record.calls.some((c) => c.byComputer.shot)).toBe(true);

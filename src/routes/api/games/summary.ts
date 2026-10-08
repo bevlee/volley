@@ -13,6 +13,8 @@ export function summary(g: StoredGame, viewer: string | null) {
 		winner: g.winner,
 		/** The team the viewer played, if they're in this game. */
 		you,
+		/** Each team's player's name; null for the computer. */
+		names: g.names,
 		/** Whether each team was played by a person or the computer. */
 		sides: { A: g.players.A ? 'player' : 'computer', B: g.players.B ? 'player' : 'computer' } as const
 	};

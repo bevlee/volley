@@ -6,6 +6,9 @@ export type Action = 'serve' | 'call';
 
 export type Presence = 'waiting' | 'connected' | 'away';
 
+/** Each team's player's name; null for an empty seat. */
+export type Names = Record<TeamId, string | null>;
+
 /** A clock as sent: `msLeft` counts from when the message is received (the two machines' clocks needn't agree). */
 export interface ClockView {
 	action: Action;
@@ -24,9 +27,11 @@ export type ToClient =
 			locked: TeamId[];
 			clock: ClockView | null;
 			opponent: Presence;
+			names: Names;
 			savedId: string | null;
 	  }
 	| { event: 'presence'; opponent: Presence }
+	| { event: 'names'; names: Names }
 	| { event: 'locked'; team: TeamId }
 	| { event: 'clock'; clock: ClockView | null }
 	| { event: 'timedOut'; team: TeamId; action: Action }
@@ -38,5 +43,6 @@ export type FromClient =
 	| { type: 'serve'; at: number }
 	| { type: 'shot'; at: number; shot: Shot }
 	| { type: 'defence'; at: number; block: Channel; stance: Stance }
-	| { type: 'rematch' };
+	| { type: 'rematch' }
+	| { type: 'rename'; name: string };
 

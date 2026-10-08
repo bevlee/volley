@@ -8,6 +8,7 @@ const game = (over: Partial<NewGame> = {}): NewGame => ({
 	fingerprint: 'fp1',
 	record: { seed: 123456789, calls: [{ shot: 'line', block: 'cross', stance: 'deep', byComputer: { shot: false, defence: true } }] },
 	players: { A: 'p1', B: 'p2' },
+	names: { A: 'Bev', B: 'Sam' },
 	score: { A: 21, B: 17 },
 	winner: 'A',
 	...over

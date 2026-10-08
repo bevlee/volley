@@ -78,9 +78,9 @@ async function pair(url: string) {
 	const a = player(url);
 	const b = player(url);
 	await Promise.all([connected(a), connected(b)]);
-	const { code } = (await a.ask('create')) as { code: string };
-	const joined = b.next('snapshot');
-	expect(await b.ask('join', code.toLowerCase())).toEqual({ code, team: 'B' });
+	const { code } = (await a.ask('create', 'Ann')) as { code: string };
+	const joined = Promise.all([a.next('snapshot'), b.next('snapshot')]);
+	expect(await b.ask('join', code.toLowerCase(), '  Bo  ')).toEqual({ code, team: 'B' });
 	await joined;
 	return { a, b, code };
 }
@@ -116,6 +116,15 @@ describe('sockets', () => {
 		expect(after[0].log.find((e) => e.tag === 'calls' && e.rally === atCall.rally)?.data).toMatchObject({ shot: 'tip', block: 'line', stance: 'short' });
 	});
 
+	it('shows both names, and a rename to both players, mid-game', async () => {
+		const { url } = await startServer();
+		const { a, b } = await pair(url);
+		expect(a.got.snapshot!.at(-1)).toMatchObject({ names: { A: 'Ann', B: 'Bo' } });
+		const renamed = b.next('names');
+		a.emit('rename', { name: 'Annie' });
+		expect(await renamed).toEqual({ event: 'names', names: { A: 'Annie', B: 'Bo' } });
+	});
+
 	it('gives a player who reconnects their seat and where the game is', async () => {
 		const { url } = await startServer();
 		const { a, b, code } = await pair(url);
@@ -140,8 +149,10 @@ describe('sockets', () => {
 		const welcome = new Promise((r) => c.socket.once('welcome', r));
 		await connected(c);
 		expect(await welcome).toEqual({ seated: false });
-		expect(await c.ask('join', 'ZZZZ')).toEqual({ error: 'No game with that code' });
-		expect(await c.ask('join', code)).toEqual({ error: 'That room is full' });
+		expect(await c.ask('join', 'ZZZZ', 'Cy')).toEqual({ error: 'No game with that code' });
+		expect(await c.ask('join', code, 'Cy')).toEqual({ error: 'That room is full' });
+		expect(await c.ask('join', code, '   ')).toEqual({ error: 'Pick a name' });
+		expect(await c.ask('create', '')).toEqual({ error: 'Pick a name' });
 	});
 
 	it('saves the game at the end and tells both players', async () => {
@@ -170,6 +181,7 @@ describe('sockets', () => {
 		const saved = (await store.get(id, (await import('./build')).FINGERPRINT))!;
 		expect(saved.mode).toBe('online');
 		expect(saved.players).toEqual({ A: a.id, B: b.id });
+		expect(saved.names).toEqual({ A: 'Ann', B: 'Bo' });
 		expect(replayGame(saved.record)).toEqual(room.game);
 		expect(saved.score).toEqual(room.game.score);
 		expect(a.game().phase.kind).toBe('gameOver');

@@ -50,6 +50,7 @@ So the server holds the true `Game`, runs `step` itself and sends clients copies
 The game only waits for players in two places: **the call** and **the serve** (at the start of the game and after each point). Everything else plays on its own, as it does now.
 
 1. **Lobby.** `/` is a main screen with *Play vs computer* (`/computer`) and *Play vs opponent* (`/online`). `/online` has *Create room* and *Join game* (a code box). The creator is Team A, the joiner is Team B. The creator sees the code and a *Copy invite link* button (`/online?code=KXQT`) while they wait. A code in the wrong format or with no room shows a "Not valid" toast (svelte-sonner) and stays on the join form; a full room says "That game is full". The game stays at `/online` rather than getting its own URL: the server reseats you by `playerId` after a reload, and the `?code=` link covers invites. *Leave game* gives up the seat.
+   **Names.** Every player gives a name before their first online game; it's remembered in `localStorage`, so after that create, join and invite links work without asking. A first-timer opening an invite link gets one card: "Join room KXQT", a name box, Join. The name is only a label on the seat (the `playerId` is the identity), so it can be changed any time, mid-game included ("You're Bev · change"), two players can share one, and nothing else depends on it. Names show under the team letters, in the room bar, the waiting messages and the timeout toasts, and are saved with the game. The in-game players stay A1, A2, B1, B2.
 2. **Serve.** In the `serve` and `pointOver` phases, the serving team's player presses Space or Serve, or the clock serves for them. The other player sees "Waiting for B2 to serve". The server steps through the auto phases (serve, pass, set) up to `calls` and sends the whole chain of states.
 3. **Calls.** Both players pick at the same time, the attacker a shot and the defender a block and dig, as in single player now. After locking in you see "Waiting for the other team". The opponent sees only that you've locked in, never your call. If a clock runs out, the computer makes that side's call (see [Turn clock](#turn-clock)). Once both calls are in, the server steps the `calls` phase with both choices, steps `hit`, runs any auto phases that follow, and sends the chain.
 4. **Point over / game over.** Back to step 2. At game over the server saves the game and sends both players its replay link. Either player can press *Rematch*. The game starts once both have pressed it, with a new seed and the two players swapping teams. The engine always has B serve first, so swapping teams is how the first serve alternates.
@@ -75,12 +76,13 @@ Client → server (the ones marked *ack* reply through Socket.IO's acknowledgeme
 
 | event | fields | when |
 | --- | --- | --- |
-| `create` *ack* | | lobby; replies `{ code, team }` |
-| `join` *ack* | `code` | lobby; replies `{ code, team }` or `{ error }` (bad code, room full) |
+| `create` *ack* | `name` | lobby; replies `{ code, team }`, or `{ error }` without a name |
+| `join` *ack* | `code`, `name` | lobby; replies `{ code, team }` or `{ error }` (bad code, room full, no name) |
 | `serve` | `at` | your team serves, phase `serve` or `pointOver` |
 | `shot` | `at`, `shot` | you attack, phase `calls` |
 | `defence` | `at`, `block`, `stance` | you defend, phase `calls` |
 | `rematch` | | `gameOver` |
+| `rename` | `name` | any time |
 
 Server → client:
 
@@ -92,6 +94,7 @@ Server → client:
 | `locked` | `team` | that team has locked in a call, contents hidden |
 | `clock` | `action: 'serve' \| 'call'`, `teams: TeamId[]`, `msLeft` | who owes an action and how long they have; `teams: []` stops the clock |
 | `timedOut` | `team`, `action` | the clock ran out and the computer chose for that team |
+| `names` | `names` | both players' names, after a join, leave or rename |
 | `rematchAsked` | `team` | that team wants a rematch |
 | `saved` | `id` | the game is over and saved; the replay is at `/replay/<id>` |
 

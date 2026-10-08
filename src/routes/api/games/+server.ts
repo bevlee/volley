@@ -52,6 +52,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 		fingerprint: FINGERPRINT,
 		record: upload.record,
 		players: upload.team === 'A' ? { A: upload.playerId, B: null } : { A: null, B: upload.playerId },
+		names: upload.team === 'A' ? { A: upload.name, B: null } : { A: null, B: upload.name },
 		score: final.score,
 		winner: final.winner!
 	});

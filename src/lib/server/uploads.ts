@@ -1,5 +1,6 @@
 import type { GameRecord, RecordedCall } from '../engine/replay';
 import type { TeamId } from '../engine/types';
+import { cleanName } from '../online/names';
 
 /**
  * Checking what browsers send to the API: the shape of an uploaded game against the computer, the
@@ -22,6 +23,8 @@ export interface Upload {
 	playerId: string;
 	/** The team the player played. The other side is the computer. */
 	team: TeamId;
+	/** The player's name, if they've given one. */
+	name: string | null;
 }
 
 const oneOf = <T extends string>(v: unknown, values: readonly T[]): v is T => values.includes(v as T);
@@ -43,7 +46,7 @@ function isCall(c: unknown): c is RecordedCall {
 /** An upload in the right shape, or why not. It still has to replay before it's saved. */
 export function parseUpload(body: unknown): Upload | string {
 	if (typeof body !== 'object' || body === null) return 'Expected a JSON object';
-	const { seed, calls, fingerprint, playerId, team } = body as Record<string, unknown>;
+	const { seed, calls, fingerprint, playerId, team, name } = body as Record<string, unknown>;
 	if (!Number.isSafeInteger(seed) || (seed as number) < 0 || (seed as number) >= 2 ** 32) return 'Bad seed';
 	if (!Array.isArray(calls) || calls.length > MAX_CALLS || !calls.every(isCall)) return 'Bad calls';
 	if (typeof fingerprint !== 'string' || fingerprint.length > 32) return 'Bad fingerprint';
@@ -55,7 +58,7 @@ export function parseUpload(body: unknown): Upload | string {
 		stance,
 		byComputer: { shot: byComputer.shot, defence: byComputer.defence }
 	}));
-	return { record: { seed: seed as number, calls: clean }, fingerprint, playerId, team };
+	return { record: { seed: seed as number, calls: clean }, fingerprint, playerId, team, name: cleanName(name) || null };
 }
 
 /**

@@ -17,6 +17,8 @@ export interface NewGame {
 	record: GameRecord;
 	/** Each team's playerId; null for the computer. */
 	players: Record<TeamId, string | null>;
+	/** Each team's player's name at the end of the game; null for the computer. */
+	names: Record<TeamId, string | null>;
 	score: Record<TeamId, number>;
 	winner: TeamId;
 }
@@ -92,7 +94,8 @@ export const MIGRATIONS: string[] = [
 		created_at  timestamptz not null default now()
 	);
 	create index games_player_a on games (player_a, created_at desc);
-	create index games_player_b on games (player_b, created_at desc);`
+	create index games_player_b on games (player_b, created_at desc);`,
+	`alter table games add column name_a text, add column name_b text;`
 ];
 
 type Sql = postgres.Sql;
@@ -119,6 +122,8 @@ interface Row {
 	calls: GameRecord['calls'];
 	player_a: string | null;
 	player_b: string | null;
+	name_a: string | null;
+	name_b: string | null;
 	score_a: number;
 	score_b: number;
 	winner: TeamId;
@@ -132,6 +137,7 @@ const fromRow = (r: Row): StoredGame => ({
 	fingerprint: r.fingerprint,
 	record: { seed: Number(r.seed), calls: r.calls },
 	players: { A: r.player_a, B: r.player_b },
+	names: { A: r.name_a, B: r.name_b },
 	score: { A: r.score_a, B: r.score_b },
 	winner: r.winner,
 	createdAt: r.created_at
@@ -151,6 +157,8 @@ export function postgresStore(sql: Sql = postgres({ max: 5, onnotice: () => {} }
 				calls: sql.json(g.record.calls as unknown as postgres.JSONValue),
 				player_a: g.players.A,
 				player_b: g.players.B,
+				name_a: g.names.A,
+				name_b: g.names.B,
 				score_a: g.score.A,
 				score_b: g.score.B,
 				winner: g.winner

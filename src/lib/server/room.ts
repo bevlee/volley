@@ -2,9 +2,10 @@ import { randomChoosers, type Choosers } from '../engine/choosers';
 import { newGame, other, step } from '../engine/rally';
 import { recordGame, type GameRecord, type RecordedCall } from '../engine/replay';
 import type { Channel, Game, Shot, Stance, TeamId } from '../engine/types';
-import type { Action, ClockView, FromClient, Presence, ToClient } from '../online/protocol';
+import { cleanName } from '../online/names';
+import type { Action, ClockView, FromClient, Names, Presence, ToClient } from '../online/protocol';
 
-export type { Action, ClockView, FromClient, Presence, ToClient };
+export type { Action, ClockView, FromClient, Names, Presence, ToClient };
 import { CODE_LENGTH, CODE_LETTERS } from '../online/codes';
 import { playsItself } from '../ui/story';
 import { playbackMs } from '../ui/timing';
@@ -28,6 +29,8 @@ const STANCES: readonly Stance[] = ['deep', 'short'];
 
 export interface Seat {
 	playerId: string;
+	/** Shown to both players. Can change at any time; nothing depends on it. */
+	name: string;
 	connected: boolean;
 }
 
@@ -67,6 +70,8 @@ export interface Save {
 	record: GameRecord;
 	/** Each team's playerId; null if the seat was empty when the game ended (the computer finished it). */
 	players: Record<TeamId, string | null>;
+	/** The names at the end of the game. */
+	names: Names;
 	score: Game['score'];
 	winner: TeamId;
 }
@@ -88,11 +93,12 @@ export function newCode(taken: (code: string) => boolean, random: () => number =
 	}
 }
 
-export function createRoom(code: string, playerId: string, seed: number, now: number): Room {
+/** `name` must already be clean (see `cleanName`). */
+export function createRoom(code: string, playerId: string, name: string, seed: number, now: number): Room {
 	return {
 		code,
 		game: newGame(seed),
-		seats: { A: { playerId, connected: true } },
+		seats: { A: { playerId, name, connected: true } },
 		pending: {},
 		byComputer: [],
 		clock: null,
@@ -106,6 +112,8 @@ export const teamOf = (room: Room, playerId: string): TeamId | null =>
 	room.seats.A?.playerId === playerId ? 'A' : room.seats.B?.playerId === playerId ? 'B' : null;
 
 const out = (to: TeamId | 'both', msg: ToClient): Send[] => (to === 'both' ? ['A', 'B'] : [to]).map((t) => ({ to: t as TeamId, msg }));
+
+export const names = (room: Room): Names => ({ A: room.seats.A?.name ?? null, B: room.seats.B?.name ?? null });
 
 function presence(room: Room, team: TeamId): Presence {
 	const seat = room.seats[other(team)];
@@ -137,6 +145,7 @@ export function snapshot(room: Room, team: TeamId, now: number): Send {
 			locked: locked(room),
 			clock: clockView(room, now),
 			opponent: presence(room, team),
+			names: names(room),
 			savedId: room.savedId
 		}
 	};
@@ -146,12 +155,12 @@ export function snapshot(room: Room, team: TeamId, now: number): Send {
  * Takes the free seat: B in a new room, where the game starts with the clock on B's serve, or
  * whichever seat someone left, where the game carries on.
  */
-export function join(room: Room, playerId: string, now: number): { team: TeamId; send: Send[] } | { error: string } {
+export function join(room: Room, playerId: string, name: string, now: number): { team: TeamId; send: Send[] } | { error: string } {
 	const seated = teamOf(room, playerId);
 	if (seated) return { team: seated, send: connect(room, seated, now) };
 	const team: TeamId | null = !room.seats.B ? 'B' : !room.seats.A ? 'A' : null;
 	if (!team) return { error: 'That room is full' };
-	room.seats[team] = { playerId, connected: true };
+	room.seats[team] = { playerId, name, connected: true };
 	room.lastActive = now;
 	if (room.clock) resumeClock(room, now);
 	else startClock(room, [], now);
@@ -200,7 +209,7 @@ export function leave(room: Room, team: TeamId, now: number): Send[] {
 	delete room.seats[team];
 	pauseClock(room, now);
 	room.rematch = room.rematch.filter((t) => t !== team);
-	return out(other(team), { event: 'presence', opponent: 'waiting' });
+	return [...out(other(team), { event: 'presence', opponent: 'waiting' }), ...out(other(team), { event: 'names', names: names(room) })];
 }
 
 export const isEmpty = (room: Room) => !room.seats.A && !room.seats.B;
@@ -250,6 +259,7 @@ function advance(room: Room, choosers: Choosers, now: number): Outcome {
 		save: {
 			record: recordGame(g, room.byComputer),
 			players: { A: room.seats.A?.playerId ?? null, B: room.seats.B?.playerId ?? null },
+			names: names(room),
 			score: { ...g.score },
 			winner: g.winner!
 		}
@@ -276,6 +286,7 @@ const NOTHING: Outcome = { send: [] };
 /** Applies one message from a seated player. Anything out of turn, stale or invalid is ignored. */
 export function act(room: Room, team: TeamId, msg: FromClient, now: number, seed = newSeed): Outcome {
 	const g = room.game;
+	if (msg.type === 'rename') return rename(room, team, msg.name, now);
 	const bothSeated = room.seats.A && room.seats.B;
 	if (!bothSeated) return NOTHING;
 	if (msg.type === 'rematch') return rematch(room, team, now, seed);
@@ -298,6 +309,16 @@ export function act(room: Room, team: TeamId, msg: FromClient, now: number, seed
 		}
 	}
 	return NOTHING;
+}
+
+/** Any time, even mid-game: the name is only a label. A name that cleans to nothing is ignored. */
+function rename(room: Room, team: TeamId, raw: unknown, now: number): Outcome {
+	const name = cleanName(raw);
+	const seat = room.seats[team];
+	if (!seat || !name || name === seat.name) return NOTHING;
+	seat.name = name;
+	room.lastActive = now;
+	return { send: out('both', { event: 'names', names: names(room) }) };
 }
 
 /** One side has locked in: the other side learns only that, and their clock is the only one left. */

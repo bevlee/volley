@@ -21,6 +21,7 @@
 		initial,
 		controlled,
 		you = null,
+		names = null,
 		shown = $bindable(),
 		idle = $bindable(true),
 		locked = false,
@@ -44,6 +45,8 @@
 		controlled: TeamId | null;
 		/** Online, the player's team, marked "you" in the score. */
 		you?: TeamId | null;
+		/** Online, each team's player's name, for the score. */
+		names?: Record<TeamId, string | null> | null;
 		/** What the court is showing: lags the latest state while a chain plays out. */
 		shown?: Game;
 		/** Nothing is playing out: the court shows the latest state. */
@@ -257,7 +260,7 @@
 
 <!-- --chrome-h is roughly the top bar plus the dock (and the scoreline when narrow), so the court fills the rest of the screen. -->
 <main style:--extra-h="{extraHeight}px">
-	<TopBar game={view} {you} {debugOpen} onhelp={() => rules.toggle()} {ondebug} />
+	<TopBar game={view} {you} {names} {debugOpen} onhelp={() => rules.toggle()} {ondebug} />
 	{@render banner?.()}
 	<div class="play">
 		<div class="side"><ScorePanel {sheet} /></div>

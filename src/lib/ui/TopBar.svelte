@@ -6,6 +6,7 @@
 	let {
 		game,
 		you = null,
+		names = null,
 		debugOpen = false,
 		onhelp,
 		ondebug
@@ -13,6 +14,8 @@
 		game: Game;
 		/** Online, the team this player has. */
 		you?: TeamId | null;
+		/** Online, each team's player's name, shown under the team's letter. */
+		names?: Record<TeamId, string | null> | null;
 		debugOpen?: boolean;
 		onhelp: () => void;
 		/** Shows the debug button; games against the computer only. */
@@ -20,16 +23,20 @@
 	} = $props();
 </script>
 
+{#snippet tag(team: TeamId)}
+	{#if names?.[team]}<small class:you={you === team}>{names[team]}</small>{:else if you === team}<small class="you">you</small>{/if}
+{/snippet}
+
 <header class="bar">
 	<a class="title" href="/" title="Back to the main screen" aria-label="Back to the main screen">←<span class="word">Volley</span></a>
 	<div class="score" aria-live="polite">
-		<span class="a">A{#if you === 'A'}<small>you</small>{/if}</span>
+		<span class="a">A{@render tag('A')}</span>
 		{#key game.score.A}<span class="num pop a">{game.score.A}</span>{/key}
 		<span class="serve" class:on={game.serving === 'A'} title="Serving"></span>
 		<span class="dash">–</span>
 		<span class="serve" class:on={game.serving === 'B'} title="Serving"></span>
 		{#key game.score.B}<span class="num pop b">{game.score.B}</span>{/key}
-		<span class="b">B{#if you === 'B'}<small>you</small>{/if}</span>
+		<span class="b">B{@render tag('B')}</span>
 	</div>
 	<span class="meta">
 		{#if game.winner}
@@ -75,10 +82,18 @@
 	/* "you" under your team's letter, online. */
 	.score small {
 		display: block;
-		font-size: 0.6rem;
-		font-weight: 600;
-		line-height: 1;
+		max-width: 6rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 0.65rem;
+		font-weight: 500;
+		line-height: 1.1;
 		text-align: center;
+	}
+	.score small.you {
+		font-weight: 800;
+		text-decoration: underline;
 	}
 	.score {
 		grid-area: score;

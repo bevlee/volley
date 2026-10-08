@@ -24,6 +24,7 @@ import {
 import type { GameStore } from './store';
 import { isPlayerId } from './uploads';
 import { normaliseCode } from '../online/codes';
+import { cleanName } from '../online/names';
 
 /**
  * Connects rooms to Socket.IO. Each browser connects with `auth: { playerId }` and joins a Socket.IO
@@ -40,7 +41,8 @@ export interface SocketOptions {
 
 type Ack = (reply: { code: string; team: string } | { error: string }) => void;
 
-const ACTIONS = ['serve', 'shot', 'defence', 'rematch'] as const;
+const ACTIONS = ['serve', 'shot', 'defence', 'rematch', 'rename'] as const;
+const NO_NAME = 'Pick a name';
 
 export function attachSockets(http: HttpServer, { store, now = Date.now, sweepMs = 60_000 }: SocketOptions) {
 	const io = new Server(http, { serveClient: false });
@@ -79,7 +81,7 @@ export function attachSockets(http: HttpServer, { store, now = Date.now, sweepMs
 		if (!s) return;
 		store()
 			.then((st) =>
-				st.save({ mode: 'online', version: VERSION, fingerprint: FINGERPRINT, record: s.record, players: s.players, score: s.score, winner: s.winner })
+				st.save({ mode: 'online', version: VERSION, fingerprint: FINGERPRINT, record: s.record, players: s.players, names: s.names, score: s.score, winner: s.winner })
 			)
 			.then((id) => rooms.has(room.code) && deliver(room, saved(room, id)))
 			.catch((e) => console.error(`Couldn't save the game in room ${room.code}`, e));
@@ -128,24 +130,28 @@ export function attachSockets(http: HttpServer, { store, now = Date.now, sweepMs
 			schedule(s.room);
 		}
 
-		socket.on('create', (ack: unknown) => {
+		socket.on('create', (rawName: unknown, ack: unknown) => {
 			if (typeof ack !== 'function') return;
+			const name = cleanName(rawName);
+			if (!name) return (ack as Ack)({ error: NO_NAME });
 			leaveSeat(playerId);
 			const code = newCode((c) => rooms.has(c));
-			const room = createRoom(code, playerId, newSeed(), now());
+			const room = createRoom(code, playerId, name, newSeed(), now());
 			rooms.set(code, room);
 			seatOf.set(playerId, code);
 			(ack as Ack)({ code, team: 'A' });
 			deliver(room, [snapshot(room, 'A', now())]);
 		});
 
-		socket.on('join', (rawCode: unknown, ack: unknown) => {
+		socket.on('join', (rawCode: unknown, rawName: unknown, ack: unknown) => {
 			if (typeof ack !== 'function' || typeof rawCode !== 'string') return;
+			const name = cleanName(rawName);
+			if (!name) return (ack as Ack)({ error: NO_NAME });
 			const code = normaliseCode(rawCode);
 			const room = rooms.get(code);
 			if (!room) return (ack as Ack)({ error: 'No game with that code' });
 			if (seatOf.get(playerId) !== code) leaveSeat(playerId);
-			const result = join(room, playerId, now());
+			const result = join(room, playerId, name, now());
 			if ('error' in result) return (ack as Ack)(result);
 			seatOf.set(playerId, code);
 			(ack as Ack)({ code, team: result.team });
