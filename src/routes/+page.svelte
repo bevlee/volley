@@ -5,6 +5,7 @@
 	import Controls from '#lib/ui/Controls.svelte';
 	import DebugDrawer from '#lib/ui/DebugDrawer.svelte';
 	import Rules from '#lib/ui/Rules.svelte';
+	import RallyHistory from '#lib/ui/RallyHistory.svelte';
 	import ScoreLine from '#lib/ui/ScoreLine.svelte';
 	import ScorePanel from '#lib/ui/ScorePanel.svelte';
 	import { scoreSheet, type ScoreSheet } from '#lib/ui/scores.ts';
@@ -230,7 +231,7 @@
 	<title>Volley</title>
 </svelte:head>
 
-<!-- --chrome-h is roughly the top bar plus the dock (and the scoreline when narrow), so the court fills the rest of the screen. -->
+<!-- --chrome-h is roughly the top bar plus the dock (and the rally history and scoreline when narrow), so the court fills the rest of the screen. -->
 <main>
 	<TopBar game={shown} {debugOpen} onhelp={() => rules.toggle()} ondebug={() => (debugOpen = !debugOpen)} />
 	<div class="play">
@@ -245,6 +246,7 @@
 				onshot={choosing ? choose : null}
 				onpreview={(s) => (preview = s)}
 			/>
+			<RallyHistory game={shown} />
 			<ScoreLine {sheet} bind:this={scoreLine} />
 			<Controls
 				status={statusLine(shown, controlled)}
@@ -300,7 +302,7 @@
 	/* Narrower, the court takes the full width and a one-row scoreline under it stands in for the panel. */
 	@media (max-width: 860px) {
 		main {
-			--chrome-h: 290px;
+			--chrome-h: 338px;
 		}
 		.play {
 			grid-template-columns: minmax(0, 1fr);
@@ -313,7 +315,7 @@
 	   let the court shrink further rather than push the controls off the screen. */
 	@media (max-width: 600px) {
 		main {
-			--chrome-h: 276px;
+			--chrome-h: 324px;
 			--court-min: 200px;
 		}
 	}
