@@ -124,7 +124,7 @@ describe('sockets', () => {
 		const { url } = await startServer();
 		const { b } = await pair(url);
 		// B serves first; until B's screen is ready, the server holds more than a full clock.
-		expect(b.got.snapshot!.at(-1)!.clock!.msLeft).toBeGreaterThan(CLOCK_MS);
+		expect((b.got.snapshot!.at(-1) as Msg<'snapshot'>).clock!.msLeft).toBeGreaterThan(CLOCK_MS);
 		const clock = b.next('clock');
 		b.emit('ready', { at: 0 });
 		expect((await clock).clock!.msLeft).toBeLessThanOrEqual(CLOCK_MS);
