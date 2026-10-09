@@ -168,7 +168,9 @@
 	.speed-note {
 		color: var(--muted);
 		font-size: 0.85rem;
-		margin-top: 6px;
+		margin: 6px 0 14px;
+		padding-bottom: 12px;
+		border-bottom: 1px solid var(--border);
 	}
 	h3 {
 		font-size: 0.75rem;
