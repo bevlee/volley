@@ -5,6 +5,7 @@
 	import { playerId } from '#lib/online/identity.ts';
 	import GameScreen from '#lib/ui/GameScreen.svelte';
 	import Menu from '#lib/ui/Menu.svelte';
+	import { paced } from '#lib/ui/pace.svelte.ts';
 	import { replayer } from '#lib/ui/record.ts';
 
 	/**
@@ -84,7 +85,7 @@
 			auto = false;
 			return;
 		}
-		const timer = setTimeout(advance, shown.phase.kind === 'pointOver' ? 1500 : 600);
+		const timer = setTimeout(advance, paced(shown.phase.kind === 'pointOver' ? 1500 : 600));
 		return () => clearTimeout(timer);
 	});
 

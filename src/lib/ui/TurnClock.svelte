@@ -21,8 +21,8 @@
 	});
 
 	/**
-	 * The server starts the clock once it reckons the moves have played out, and reckons long, so the
-	 * court can be ready a beat early: never show more than a full clock.
+	 * Each player's time starts once their screen has played the moves out and told the server. Until
+	 * then the server sends more than a full clock (the longest it will wait): show it full.
 	 */
 	const left = $derived(
 		Math.min(FULL_MS, clock ? (clock.paused ? clock.msLeft : Math.max(0, clock.receivedAt + clock.msLeft - now)) : 0)

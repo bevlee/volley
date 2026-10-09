@@ -3,6 +3,7 @@
 	import { Tween } from 'svelte/motion';
 	import type { Player, TeamId } from '#lib/engine/types.ts';
 	import type { Role } from './layout';
+	import { paced } from './pace.svelte';
 	import type { Action } from './story';
 
 	let {
@@ -36,7 +37,7 @@
 	const W = 80;
 	/** Three short lines (name, role, stats): a character's name and role don't fit on one line. */
 	const H = 46;
-	const pos = Tween.of(() => ({ x, y }), { duration: 350, easing: cubicOut });
+	const pos = Tween.of(() => ({ x, y }), { duration: () => paced(350), easing: cubicOut });
 	// The top team faces down the screen, so their dives lunge the other way.
 	const facing = $derived(near ? -1 : 1);
 </script>
@@ -103,19 +104,19 @@
 		letter-spacing: 0.06em;
 	}
 	.spike {
-		animation: spike 600ms ease-out;
+		animation: spike calc(600ms * var(--pace, 1)) ease-out;
 	}
 	.tip {
-		animation: tip 600ms ease-out;
+		animation: tip calc(600ms * var(--pace, 1)) ease-out;
 	}
 	.block {
-		animation: block 600ms ease-out;
+		animation: block calc(600ms * var(--pace, 1)) ease-out;
 	}
 	.dig {
-		animation: dig 600ms ease-out;
+		animation: dig calc(600ms * var(--pace, 1)) ease-out;
 	}
 	.dive {
-		animation: dive 800ms ease-out;
+		animation: dive calc(800ms * var(--pace, 1)) ease-out;
 	}
 	/* Jump at the net, then come down. */
 	@keyframes spike {

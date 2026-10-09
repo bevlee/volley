@@ -15,8 +15,13 @@ import { playbackMs } from '../ui/timing';
  * tests can use fake time; the socket layer owns the one real timer per room.
  */
 
-/** How long a player has for each action. */
+/** How long a player has for each action, from when their screen has caught up. */
 export const CLOCK_MS = 20_000;
+/**
+ * A screen that never says it has caught up (closed, asleep, very slow) gets its clock started
+ * anyway after twice the moves' playback at normal speed plus this, so the game can't stall.
+ */
+export const READY_GRACE_MS = 3000;
 /** A room nobody has been connected to for this long is closed. */
 export const EMPTY_ROOM_MS = 30 * 60_000;
 /** A room where nothing has happened for this long is closed. */
@@ -33,13 +38,21 @@ export interface Seat {
 	connected: boolean;
 }
 
+/**
+ * The turn clock. The server sends what happened and each screen plays it out at its own speed, so
+ * each team's 20 seconds start when its screen says it has caught up (`ready`), not at a time the
+ * server guesses.
+ */
 export interface Clock {
 	action: Action;
-	/** The teams that still owe the action. At the call, both until one locks in. */
+	/** The teams that still owe the action. At the call, both until one locks in or runs out. */
 	teams: TeamId[];
-	deadline: number;
-	/** Set while the clock is stopped (both players away): the time it had left. */
-	pausedLeft?: number;
+	/** When each owing team runs out: `CLOCK_MS` after it's ready, or after the longest wait for that. */
+	deadlines: Partial<Record<TeamId, number>>;
+	/** The teams whose screens have caught up with this action. */
+	ready: TeamId[];
+	/** Set while the clock is stopped (both players away, or a seat empty): when it stopped. */
+	pausedAt?: number;
 }
 
 export interface Room {
@@ -119,18 +132,36 @@ function presence(room: Room, team: TeamId): Presence {
 	return !seat ? 'waiting' : seat.connected ? 'connected' : 'away';
 }
 
-export function clockView(room: Room, now: number): ClockView | null {
+/**
+ * The clock as `team` sees it: their own time while they owe the action, otherwise the time of the
+ * team they're waiting on. Before a team is ready, its time is more than `CLOCK_MS`; screens show
+ * a full clock until it starts.
+ */
+export function clockView(room: Room, now: number, team: TeamId): ClockView | null {
 	const c = room.clock;
 	if (!c) return null;
-	const paused = c.pausedLeft !== undefined;
-	return { action: c.action, teams: [...c.teams], msLeft: paused ? c.pausedLeft! : Math.max(0, c.deadline - now), paused };
+	const at = c.pausedAt ?? now;
+	const whose = c.teams.includes(team) ? team : c.teams[0];
+	const msLeft = whose ? Math.max(0, c.deadlines[whose]! - at) : 0;
+	return { action: c.action, teams: [...c.teams], msLeft, paused: c.pausedAt !== undefined };
 }
 
-/** The teams that have locked in their part of the current call. */
+/** Each player's view of the clock. */
+const clocks = (room: Room, now: number): Send[] =>
+	(['A', 'B'] as const).map((team) => ({ to: team, msg: { event: 'clock', clock: clockView(room, now, team) } }));
+
+/** When the clock next runs out for someone, if it's running. */
+export function nextDeadline(room: Room): number | null {
+	const c = room.clock;
+	if (!c || c.pausedAt !== undefined || !c.teams.length) return null;
+	return Math.min(...c.teams.map((t) => c.deadlines[t]!));
+}
+
+/** The teams that are done with the current call: locked in, or the computer will call for them. */
 const locked = (room: Room): TeamId[] => {
 	const attacking = room.game.attack?.team;
 	if (room.game.phase.kind !== 'calls' || !attacking) return [];
-	return [...(room.pending.shot ? [attacking] : []), ...(room.pending.defence ? [other(attacking)] : [])];
+	return [attacking, other(attacking)].filter((t) => !room.clock?.teams.includes(t));
 };
 
 export function snapshot(room: Room, team: TeamId, now: number): Send {
@@ -142,7 +173,7 @@ export function snapshot(room: Room, team: TeamId, now: number): Send {
 			team,
 			game: redact(room.game),
 			locked: locked(room),
-			clock: clockView(room, now),
+			clock: clockView(room, now, team),
 			opponent: presence(room, team),
 			names: names(room),
 			savedId: room.savedId
@@ -168,16 +199,16 @@ export function join(room: Room, playerId: string, name: string, now: number): {
 
 function pauseClock(room: Room, now: number) {
 	const c = room.clock;
-	if (c && c.pausedLeft === undefined) c.pausedLeft = Math.max(0, c.deadline - now);
+	if (c && c.pausedAt === undefined) c.pausedAt = now;
 }
 
 /** Restarts a stopped clock, if both seats are filled and someone's there to play. */
 function resumeClock(room: Room, now: number) {
 	const c = room.clock;
 	const anyone = room.seats.A?.connected || room.seats.B?.connected;
-	if (c?.pausedLeft === undefined || !room.seats.A || !room.seats.B || !anyone) return;
-	c.deadline = now + c.pausedLeft;
-	delete c.pausedLeft;
+	if (c?.pausedAt === undefined || !room.seats.A || !room.seats.B || !anyone) return;
+	for (const t of c.teams) c.deadlines[t]! += now - c.pausedAt;
+	delete c.pausedAt;
 }
 
 /** The player's socket is back: they get where things stand, the other side gets told. */
@@ -187,7 +218,7 @@ export function connect(room: Room, team: TeamId, now: number): Send[] {
 	return [
 		snapshot(room, team, now),
 		...out(other(team), { event: 'presence', opponent: 'connected' }),
-		...(room.seats[other(team)] ? out(other(team), { event: 'clock', clock: clockView(room, now) }) : [])
+		...(room.seats[other(team)] ? clocks(room, now).filter((s) => s.to === other(team)) : [])
 	];
 }
 
@@ -226,10 +257,14 @@ function owed(game: Game): { action: Action; teams: TeamId[] } | null {
 	return null;
 }
 
-/** Starts the clock for whatever `room.game` now waits on, once `chain` has played out on screen. */
+/**
+ * Sets the clock for whatever `room.game` now waits on. Each team's time starts when its screen has
+ * played `chain` out and says so, or at the latest after twice the normal playback plus a grace.
+ */
 function startClock(room: Room, chain: Game[], now: number) {
 	const next = owed(room.game);
-	room.clock = next ? { ...next, deadline: now + playbackMs(chain) + CLOCK_MS } : null;
+	const latest = now + 2 * playbackMs(chain) + READY_GRACE_MS + CLOCK_MS;
+	room.clock = next ? { ...next, deadlines: Object.fromEntries(next.teams.map((t) => [t, latest])), ready: [] } : null;
 	const playing = room.seats.A && room.seats.B && (room.seats.A.connected || room.seats.B.connected);
 	if (!playing) pauseClock(room, now);
 }
@@ -250,7 +285,7 @@ function advance(room: Room, choosers: Choosers, now: number): Outcome {
 	startClock(room, chain, now);
 	const send = [
 		...out('both', { event: 'states', chain: chain.map(redact) }),
-		...out('both', { event: 'clock', clock: clockView(room, now) })
+		...clocks(room, now)
 	];
 	if (g.phase.kind !== 'gameOver') return { send };
 	return {
@@ -289,18 +324,21 @@ export function act(room: Room, team: TeamId, msg: FromClient, now: number, seed
 	if (!bothSeated) return NOTHING;
 	if (msg.type === 'rematch') return rematch(room, team, now, seed);
 	if (msg.at !== g.steps) return NOTHING;
+	if (msg.type === 'ready') return ready(room, team, now);
+	// A team that has locked in, or run out of time, has nothing left to send for this action.
+	if (!room.clock?.teams.includes(team)) return NOTHING;
 	switch (msg.type) {
 		case 'serve':
 			if (owed(g)?.action !== 'serve' || g.serving !== team) return NOTHING;
 			return advance(room, randomChoosers, now);
 		case 'shot': {
-			if (g.phase.kind !== 'calls' || g.attack!.team !== team || room.pending.shot) return NOTHING;
+			if (g.phase.kind !== 'calls' || g.attack!.team !== team) return NOTHING;
 			if (!SHOTS.includes(msg.shot)) return NOTHING;
 			room.pending.shot = msg.shot;
 			return lockIn(room, team, now);
 		}
 		case 'defence': {
-			if (g.phase.kind !== 'calls' || g.attack!.team === team || room.pending.defence) return NOTHING;
+			if (g.phase.kind !== 'calls' || g.attack!.team === team) return NOTHING;
 			if (!CHANNELS.includes(msg.block) || !STANCES.includes(msg.stance)) return NOTHING;
 			room.pending.defence = { block: msg.block, stance: msg.stance };
 			return lockIn(room, team, now);
@@ -309,26 +347,50 @@ export function act(room: Room, team: TeamId, msg: FromClient, now: number, seed
 	return NOTHING;
 }
 
-/** One side has locked in: the other side learns only that, and their clock is the only one left. */
-function lockIn(room: Room, team: TeamId, now: number): Outcome {
-	room.lastActive = now;
-	if (room.pending.shot && room.pending.defence) return resolveCall(room, now);
-	room.clock!.teams = room.clock!.teams.filter((t) => t !== team);
-	return {
-		send: [
-			...out('both', { event: 'locked', team }),
-			...out('both', { event: 'clock', clock: clockView(room, now) })
-		]
-	};
+/**
+ * A team's screen has played out the latest moves: its time starts now, if it owes the action and
+ * hadn't already started. Saying so twice, or for an old step, changes nothing.
+ */
+function ready(room: Room, team: TeamId, now: number): Outcome {
+	const c = room.clock;
+	if (!c || c.ready.includes(team)) return NOTHING;
+	c.ready.push(team);
+	if (!c.teams.includes(team)) return NOTHING;
+	c.deadlines[team] = Math.min(c.deadlines[team]!, (c.pausedAt ?? now) + CLOCK_MS);
+	return { send: clocks(room, now) };
 }
 
-/** The clock ran out: the computer serves, or makes the missing parts of the call. */
+/**
+ * A side is done with the call: the other side learns only that. Once neither side owes anything,
+ * the call is played, with the computer's choices for any side that ran out of time.
+ */
+function lockIn(room: Room, team: TeamId, now: number): Outcome {
+	room.lastActive = now;
+	room.clock!.teams = room.clock!.teams.filter((t) => t !== team);
+	if (!room.clock!.teams.length) return resolveCall(room, now);
+	return { send: [...out('both', { event: 'locked', team }), ...clocks(room, now)] };
+}
+
+/**
+ * Someone's time ran out: the computer serves for them, or will make their part of the call. Each
+ * team has its own time, so the other side may still be choosing.
+ */
 export function tick(room: Room, now: number): Outcome {
 	const c = room.clock;
-	if (!c || c.pausedLeft !== undefined || now < c.deadline) return NOTHING;
-	const timedOut = c.teams.flatMap((team) => out('both', { event: 'timedOut', team, action: c.action }));
-	const result = c.action === 'serve' ? advance(room, randomChoosers, now) : resolveCall(room, now);
-	return { ...result, send: [...timedOut, ...result.send] };
+	const due = nextDeadline(room);
+	if (!c || due === null || now < due) return NOTHING;
+	const late = c.teams.filter((t) => c.deadlines[t]! <= now);
+	const timedOut = late.flatMap((team) => out('both', { event: 'timedOut', team, action: c.action }));
+	if (c.action === 'serve') {
+		const result = advance(room, randomChoosers, now);
+		return { ...result, send: [...timedOut, ...result.send] };
+	}
+	c.teams = c.teams.filter((t) => !late.includes(t));
+	if (!c.teams.length) {
+		const result = resolveCall(room, now);
+		return { ...result, send: [...timedOut, ...result.send] };
+	}
+	return { send: [...timedOut, ...late.flatMap((team) => out('both', { event: 'locked', team })), ...clocks(room, now)] };
 }
 
 /** The game was saved; both players get its replay id. */

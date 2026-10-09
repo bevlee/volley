@@ -1,5 +1,12 @@
 <script lang="ts">
 	import { config } from '#lib/engine/config.ts';
+	import { pace, setPace, type Pace } from './pace.svelte.ts';
+
+	const SPEEDS: { value: Pace; label: string }[] = [
+		{ value: 'quick', label: 'Quick' },
+		{ value: 'normal', label: 'Normal' },
+		{ value: 'slow', label: 'Slow' }
+	];
 
 	let dialog: HTMLDialogElement;
 
@@ -18,10 +25,19 @@
 			<h2>How to play</h2>
 			<button onclick={() => dialog.close()} aria-label="Close rules">×</button>
 		</div>
+		<div class="speed" role="radiogroup" aria-label="Animation speed">
+			<span class="speed-label">Speed</span>
+			{#each SPEEDS as s (s.value)}
+				<button role="radio" aria-checked={pace.value === s.value} class:on={pace.value === s.value} onclick={() => setPace(s.value)}>
+					{s.label}
+				</button>
+			{/each}
+		</div>
+		<p class="speed-note">How fast the court plays out on this screen. Online, your opponent keeps their own speed, and your clock starts once your screen has caught up.</p>
 		<p>
 			2v2 beach volleyball to {config.targetScore}, win by {config.winBy}. Every touch is a dice roll, and a
-			good pass or set makes the next touch better. Team <span class="a">A</span> (blue) is at the
-			bottom, <span class="b">B</span> (black) at the top.
+			good pass or set makes the next touch better. Your team is at the bottom of the court: against the
+			computer that's <span class="a">A</span> (blue), and online it's whichever side you're on.
 		</p>
 
 		<h3>The rally</h3>
@@ -125,6 +141,35 @@
 		font-size: 1.1rem;
 		margin: 0;
 	}
+	.speed {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-top: 12px;
+	}
+	.speed-label {
+		color: var(--muted);
+		margin-right: 4px;
+	}
+	.speed button {
+		font: inherit;
+		padding: 3px 12px;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		background: transparent;
+		color: var(--text);
+		cursor: pointer;
+	}
+	.speed button.on {
+		background: var(--text);
+		border-color: var(--text);
+		color: var(--surface);
+	}
+	.speed-note {
+		color: var(--muted);
+		font-size: 0.85rem;
+		margin-top: 6px;
+	}
 	h3 {
 		font-size: 0.75rem;
 		text-transform: uppercase;
@@ -154,10 +199,6 @@
 	}
 	.a {
 		color: var(--team-a);
-		font-weight: 700;
-	}
-	.b {
-		color: var(--team-b);
 		font-weight: 700;
 	}
 	.ok {

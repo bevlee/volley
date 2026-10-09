@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { paced } from './pace.svelte';
 	import { ROLL_MS } from './timing';
 	let { value, label, x, y }: { value: number; label: string; x: number; y: number } = $props();
 
@@ -54,7 +55,7 @@
 			clearInterval(flicker);
 			shown = final;
 			rolling = false;
-		}, ROLL_MS);
+		}, paced(ROLL_MS));
 		return () => {
 			clearInterval(flicker);
 			clearTimeout(settle);
@@ -78,7 +79,7 @@
 		transform-origin: center;
 	}
 	.die.rolling {
-		animation: tumble 600ms ease-out;
+		animation: tumble calc(600ms * var(--pace, 1)) ease-out;
 	}
 	rect {
 		fill: var(--surface);

@@ -157,6 +157,7 @@
 		onshot={(shot) => online.shot(screen!.latest().steps, shot)}
 		ondefence={(d) => online.defence(screen!.latest().steps, d)}
 		onover={() => online.askRematch()}
+		onsettled={(game) => online.ready(game.steps)}
 		onleave={leave}
 	>
 		{#snippet banner()}

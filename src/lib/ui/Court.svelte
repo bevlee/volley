@@ -27,6 +27,7 @@
 		type Point,
 		type Positions
 	} from './layout';
+	import { paced } from './pace.svelte';
 	import PlayerChip from './PlayerChip.svelte';
 	import { callout, playerActions, stepEntries, type Impact } from './story';
 
@@ -135,7 +136,7 @@
 			const fly = (start: Point, end: Point, k: FlightKind) => {
 				flight = { from: start, to: end, apex: FLIGHT[k].apex };
 				progress.set(0, { duration: 0 });
-				return progress.set(1, { duration: reduced ? 0 : FLIGHT[k].ms });
+				return progress.set(1, { duration: reduced ? 0 : paced(FLIGHT[k].ms) });
 			};
 			const id = ++flights;
 			if (!stop) return void fly(from, to, kind);
@@ -177,7 +178,7 @@
 		const next = moment?.impact;
 		if (!next || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		impact = next;
-		const stop = setTimeout(() => (impact = null), IMPACT_MS[next]);
+		const stop = setTimeout(() => (impact = null), paced(IMPACT_MS[next]));
 		return () => clearTimeout(stop);
 	});
 	/** A stuff block jolts the court toward the hitter's side: down for the bottom team, up for the top. */
@@ -329,7 +330,7 @@
 				<!-- A tip lands softly: rings spread out from where it drops. -->
 				{#if moment?.impact === 'tip'}
 					{#each [0, 1, 2] as i (i)}
-						<circle class="ripple" style:animation-delay="{250 + i * 180}ms" cx={ballSpot.x} cy={ballSpot.y} r="8" />
+						<circle class="ripple" style:animation-delay="{paced(250 + i * 180)}ms" cx={ballSpot.x} cy={ballSpot.y} r="8" />
 					{/each}
 				{/if}
 			{/key}
@@ -401,11 +402,11 @@
 		margin: 0 auto;
 	}
 	.shake {
-		animation: shake 450ms ease-out;
+		animation: shake calc(450ms * var(--pace, 1)) ease-out;
 	}
 	/* A crushing kill: a punch-in, then a bigger, longer shake. */
 	.smash {
-		animation: smash 700ms cubic-bezier(0.2, 0.8, 0.3, 1);
+		animation: smash calc(700ms * var(--pace, 1)) cubic-bezier(0.2, 0.8, 0.3, 1);
 	}
 	@keyframes smash {
 		8% {
@@ -429,7 +430,7 @@
 	}
 	/* A stuff block: the court jolts back toward the hitter, then settles, and the net flashes. */
 	.slam {
-		animation: slam 550ms ease-out;
+		animation: slam calc(550ms * var(--pace, 1)) ease-out;
 	}
 	@keyframes slam {
 		10% {
@@ -446,7 +447,7 @@
 		}
 	}
 	.slam .net {
-		animation: net-flash 550ms ease-out;
+		animation: net-flash calc(550ms * var(--pace, 1)) ease-out;
 	}
 	@keyframes net-flash {
 		15% {
@@ -456,7 +457,7 @@
 	}
 	/* A tip kill: the court leans in and hangs for a beat, like slow motion, then lets go. */
 	.tip {
-		animation: tip-hang 1000ms cubic-bezier(0.3, 0, 0.2, 1);
+		animation: tip-hang calc(1000ms * var(--pace, 1)) cubic-bezier(0.3, 0, 0.2, 1);
 	}
 	@keyframes tip-hang {
 		30% {
@@ -476,7 +477,7 @@
 		opacity: 0;
 		transform-box: fill-box;
 		transform-origin: center;
-		animation: ripple 1100ms ease-out forwards;
+		animation: ripple calc(1100ms * var(--pace, 1)) ease-out forwards;
 	}
 	@keyframes ripple {
 		from {
@@ -514,12 +515,12 @@
 		stroke-dasharray: 100;
 		stroke-dashoffset: 100;
 		filter: drop-shadow(0 0 2px var(--point)) drop-shadow(0 0 5px var(--point));
-		animation: trace 1100ms ease-in-out forwards;
+		animation: trace calc(1100ms * var(--pace, 1)) ease-in-out forwards;
 	}
 	.point-tint {
 		fill: var(--point);
 		opacity: 0;
-		animation: tint 1100ms ease-out forwards;
+		animation: tint calc(1100ms * var(--pace, 1)) ease-out forwards;
 	}
 	@keyframes trace {
 		to {
@@ -547,7 +548,7 @@
 		stroke-width: 3;
 		transform-box: fill-box;
 		transform-origin: center;
-		animation: impact 700ms ease-out forwards;
+		animation: impact calc(700ms * var(--pace, 1)) ease-out forwards;
 	}
 	@keyframes impact {
 		from {
@@ -562,7 +563,7 @@
 	.impact.big {
 		stroke-width: 4;
 		animation-name: impact-big;
-		animation-duration: 900ms;
+		animation-duration: calc(900ms * var(--pace, 1));
 	}
 	@keyframes impact-big {
 		from {
@@ -614,7 +615,7 @@
 		text-transform: uppercase;
 	}
 	.die {
-		transition: opacity 400ms;
+		transition: opacity calc(400ms * var(--pace, 1));
 	}
 	.die.faded {
 		opacity: 0.35;
@@ -637,7 +638,7 @@
 		stroke: var(--actual);
 		stroke-width: 1.25;
 		stroke-linecap: round;
-		animation: trail 1200ms ease-out forwards;
+		animation: trail calc(1200ms * var(--pace, 1)) ease-out forwards;
 	}
 	.trail.earlier {
 		animation: none;

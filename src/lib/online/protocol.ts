@@ -9,7 +9,10 @@ export type Presence = 'waiting' | 'connected' | 'away';
 /** Each team's player's name; null for an empty seat. */
 export type Names = Record<TeamId, string | null>;
 
-/** A clock as sent: `msLeft` counts from when the message is received (the two machines' clocks needn't agree). */
+/**
+ * A clock as sent: `msLeft` counts from when the message is received (the two machines' clocks
+ * needn't agree). It's the receiver's own time while they owe the action, else the other side's.
+ */
 export interface ClockView {
 	action: Action;
 	teams: TeamId[];
@@ -43,5 +46,7 @@ export type FromClient =
 	| { type: 'serve'; at: number }
 	| { type: 'shot'; at: number; shot: Shot }
 	| { type: 'defence'; at: number; block: Channel; stance: Stance }
-	| { type: 'rematch' };
+	| { type: 'rematch' }
+	/** The screen has played out everything up to step `at`: the player's time can start. */
+	| { type: 'ready'; at: number };
 

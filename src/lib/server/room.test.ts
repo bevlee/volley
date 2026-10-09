@@ -16,6 +16,8 @@ import {
 	join,
 	leave,
 	newCode,
+	nextDeadline,
+	READY_GRACE_MS,
 	redact,
 	tick,
 	type Outcome,
@@ -55,7 +57,7 @@ function runOut(room: Room, from = 0): { now: number; outcomes: Outcome[] } {
 	let now = from;
 	const outcomes: Outcome[] = [];
 	while (room.game.phase.kind !== 'gameOver') {
-		now = room.clock!.deadline;
+		now = nextDeadline(room)!;
 		outcomes.push(tick(room, now));
 	}
 	return { now, outcomes };
@@ -89,7 +91,7 @@ describe('rooms', () => {
 
 	it('starts the clock on B serving once both are in', () => {
 		const room = seated();
-		expect(room.clock).toEqual({ action: 'serve', teams: ['B'], deadline: CLOCK_MS });
+		expect(room.clock).toEqual({ action: 'serve', teams: ['B'], deadlines: { B: READY_GRACE_MS + CLOCK_MS }, ready: [] });
 		expect(createRoom('KXQT', 'p1', 'Bev', 1, 0).clock).toBeNull();
 	});
 
@@ -131,16 +133,19 @@ describe('serving', () => {
 		expect(room.game.steps).toBe(0);
 	});
 
-	it('plays the serve, pass and set up to the call, then starts both clocks after the playback', () => {
+	it("plays the serve, pass and set up to the call, and holds both clocks until the screens catch up", () => {
 		const { room, served } = atFirstCall();
 		const chain = msgs(served.send, 'states')[0].chain;
 		expect(chain.map((g) => g.phase.kind)).toEqual(['freeBall', 'set', 'calls']);
+		// Without a word from either screen, the time starts after twice the normal playback and a grace.
+		const latest = 1000 + 2 * playbackMs(chain) + READY_GRACE_MS + CLOCK_MS;
 		expect(room.clock).toEqual({
 			action: 'call',
 			teams: [attacker(room), defender(room)],
-			deadline: 1000 + playbackMs(chain) + CLOCK_MS
+			deadlines: { [attacker(room)]: latest, [defender(room)]: latest },
+			ready: []
 		});
-		expect(msgs(served.send, 'clock')[0].clock!.msLeft).toBe(playbackMs(chain) + CLOCK_MS);
+		expect(msgs(served.send, 'clock').map((m) => m.clock!.msLeft)).toEqual([latest - 1000, latest - 1000]);
 	});
 });
 
@@ -188,12 +193,12 @@ describe('the call', () => {
 describe('the clock', () => {
 	it('does nothing before the deadline', () => {
 		const { room } = atFirstCall();
-		expect(tick(room, room.clock!.deadline - 1)).toEqual({ send: [] });
+		expect(tick(room, nextDeadline(room)! - 1)).toEqual({ send: [] });
 	});
 
 	it('serves for a team that runs out of time', () => {
 		const room = seated();
-		const r = tick(room, CLOCK_MS);
+		const r = tick(room, nextDeadline(room)!);
 		expect(msgs(r.send, 'timedOut')).toContainEqual({ event: 'timedOut', team: 'B', action: 'serve' });
 		expect(room.game.phase.kind).toBe('calls');
 	});
@@ -203,7 +208,7 @@ describe('the clock', () => {
 		const at = room.game.steps;
 		const D = defender(room);
 		act(room, attacker(room), { type: 'shot', at, shot: 'tip' }, 2000);
-		const r = tick(room, room.clock!.deadline);
+		const r = tick(room, nextDeadline(room)!);
 		// Both players are told, about the defending side only.
 		expect(msgs(r.send, 'timedOut')).toEqual([
 			{ event: 'timedOut', team: D, action: 'call' },
@@ -217,29 +222,30 @@ describe('the clock', () => {
 		const { room } = atFirstCall();
 		const at = room.game.steps;
 		const A = attacker(room);
-		tick(room, room.clock!.deadline);
+		tick(room, nextDeadline(room)!);
 		const steps = room.game.steps;
-		expect(act(room, A, { type: 'shot', at, shot: 'line' }, room.clock?.deadline ?? 0).send).toEqual([]);
+		expect(act(room, A, { type: 'shot', at, shot: 'line' }, nextDeadline(room) ?? 0).send).toEqual([]);
 		expect(room.game.steps).toBe(steps);
 	});
 
 	it('stops while both players are away, and picks up where it was', () => {
 		const { room } = atFirstCall();
-		const left = room.clock!.deadline - 5000;
+		const left = nextDeadline(room)! - 5000;
 		disconnect(room, 'A', 5000);
-		expect(room.clock!.pausedLeft).toBeUndefined();
+		expect(room.clock!.pausedAt).toBeUndefined();
 		disconnect(room, 'B', 5000);
-		expect(room.clock!.pausedLeft).toBe(left);
+		expect(room.clock!.pausedAt).toBe(5000);
+		expect(nextDeadline(room)).toBeNull();
 		expect(tick(room, 10_000_000)).toEqual({ send: [] });
 		const sends = connect(room, 'A', 10_000_000);
-		expect(room.clock!.deadline).toBe(10_000_000 + left);
+		expect(nextDeadline(room)).toBe(10_000_000 + left);
 		expect(msgs(sends, 'snapshot')[0].clock).toMatchObject({ msLeft: left, paused: false });
 	});
 
 	it('keeps running for a player who is away while the other is there', () => {
 		const { room } = atFirstCall();
 		disconnect(room, defender(room), 5000);
-		expect(tick(room, room.clock!.deadline).send).not.toEqual([]);
+		expect(tick(room, nextDeadline(room)!).send).not.toEqual([]);
 	});
 
 	it('stops while a seat is empty, and carries on with whoever takes it', () => {
@@ -249,8 +255,56 @@ describe('the clock', () => {
 		expect(msgs(sends, 'presence')).toEqual([{ event: 'presence', opponent: 'waiting' }]);
 		expect(tick(room, 10_000_000)).toEqual({ send: [] });
 		expect(join(room, 'p3', 'Cy', 10_000_000)).toMatchObject({ team: A });
-		expect(room.clock!.pausedLeft).toBeUndefined();
+		expect(room.clock!.pausedAt).toBeUndefined();
 		expect(room.game.phase.kind).toBe('calls');
+	});
+
+	it("starts a team's time when its screen has caught up, and only then", () => {
+		const { room } = atFirstCall();
+		const at = room.game.steps;
+		const A = attacker(room);
+		const D = defender(room);
+		const waiting = room.clock!.deadlines[D];
+		const r = act(room, A, { type: 'ready', at }, 2500);
+		expect(room.clock!.deadlines).toEqual({ [A]: 2500 + CLOCK_MS, [D]: waiting });
+		// Each player hears the clock they should show: their own while they owe the call.
+		expect(r.send.map((s) => [s.to, (s.msg as Extract<ToClient, { event: 'clock' }>).clock!.msLeft])).toEqual(
+			(['A', 'B'] as const).map((t) => [t, (t === A ? 2500 + CLOCK_MS : waiting!) - 2500])
+		);
+		// Saying it again, or about an old step, changes nothing.
+		expect(act(room, A, { type: 'ready', at }, 9000).send).toEqual([]);
+		expect(act(room, D, { type: 'ready', at: at - 1 }, 9000).send).toEqual([]);
+		expect(room.clock!.deadlines).toEqual({ [A]: 2500 + CLOCK_MS, [D]: waiting });
+	});
+
+	it('runs out for a quick player while the other is still watching, and waits for the other', () => {
+		const { room } = atFirstCall();
+		const at = room.game.steps;
+		const A = attacker(room);
+		const D = defender(room);
+		act(room, A, { type: 'ready', at }, 2000);
+		const r = tick(room, 2000 + CLOCK_MS);
+		expect(msgs(r.send, 'timedOut')).toContainEqual({ event: 'timedOut', team: A, action: 'call' });
+		expect(msgs(r.send, 'locked')).toContainEqual({ event: 'locked', team: A });
+		expect(room.game.steps).toBe(at);
+		expect(room.clock!.teams).toEqual([D]);
+		// The attacker can't call now; the defender still can, and that plays the call.
+		expect(act(room, A, { type: 'shot', at, shot: 'line' }, 2000 + CLOCK_MS).send).toEqual([]);
+		act(room, D, { type: 'ready', at }, 3000);
+		const played = act(room, D, { type: 'defence', at, block: 'cross', stance: 'short' }, 4000);
+		expect(msgs(played.send, 'states')).toHaveLength(2);
+		expect(room.byComputer).toEqual([{ shot: true, defence: false }]);
+	});
+
+	it("starts the time of a screen that never says it's ready, so the game can't stall", () => {
+		const { room } = atFirstCall();
+		const at = room.game.steps;
+		const D = defender(room);
+		act(room, attacker(room), { type: 'ready', at }, 2000);
+		act(room, attacker(room), { type: 'shot', at, shot: 'tip' }, 3000);
+		const r = tick(room, nextDeadline(room)!);
+		expect(msgs(r.send, 'timedOut')).toContainEqual({ event: 'timedOut', team: D, action: 'call' });
+		expect(room.game.steps).toBeGreaterThan(at);
 	});
 });
 
@@ -267,7 +321,7 @@ describe('game over', () => {
 					? act(room, attacker(room), { type: 'shot', at, shot: (['line', 'cross', 'tip'] as const)[i % 3] }, now)
 					: room.game.phase.kind === 'calls' && i % 3 === 1
 						? act(room, defender(room), { type: 'defence', at, block: 'cross', stance: 'deep' }, now)
-						: tick(room, (now = room.clock!.deadline));
+						: tick(room, (now = nextDeadline(room)!));
 			save = r.save ?? save;
 		}
 		expect(save).toBeDefined();

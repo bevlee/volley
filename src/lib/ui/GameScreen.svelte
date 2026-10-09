@@ -10,6 +10,7 @@
 	import { ballAt, placeDice, positions, rollBall, rollPositions, type PlacedDie, type Point, type Positions } from './layout.ts';
 	import { clearsSheet, scoreSheet, type ScoreSheet } from './scores.ts';
 	import { commentary, needsDefence, needsShot, nextAction, prompt, quietLine, statusLine, stepEntries } from './story.ts';
+	import { paced } from './pace.svelte.ts';
 	import { MOVE_MS, RESOLVE_MS, pauseAfter } from './timing.ts';
 
 	/**
@@ -36,6 +37,7 @@
 		onshot,
 		ondefence,
 		onover,
+		onsettled,
 		debugOpen = false,
 		ondebug = null,
 		onleave,
@@ -71,6 +73,8 @@
 		ondefence: (defence: { block: Channel; stance: Stance }) => void;
 		/** The game-over button. */
 		onover: () => void;
+		/** The court has played out everything up to `game`, the latest state (online: start my clock). */
+		onsettled?: (game: Game) => void;
 		debugOpen?: boolean;
 		/** Shows the debug button and the D key (/admin only); null hides them. */
 		ondebug?: (() => void) | null;
@@ -128,6 +132,9 @@
 	const heading = $derived(pending.at(-1) ?? game);
 	$effect(() => {
 		idle = !busy;
+		// Reads `game` too, so a jump to a new state while idle counts as settling on it.
+		const latest = game;
+		if (!busy) untrack(() => onsettled?.(latest));
 	});
 	$effect(() => () => timers.forEach(clearTimeout));
 
@@ -173,12 +180,12 @@
 		const mustMove = !same(rollAt, positions(from)) || !same(ballDuringRoll, ballAt(from, positions(from), bottom));
 		const roll = () => {
 			dice = { key: next.steps, items: place(rollAt) };
-			timers.push(setTimeout(finish, RESOLVE_MS));
+			timers.push(setTimeout(finish, paced(RESOLVE_MS)));
 		};
 		if (mustMove) {
 			staged = { pos: rollAt, ball: ballDuringRoll };
 			dice = { key: next.steps, items: fresh ? [] : dice.items };
-			timers.push(setTimeout(roll, MOVE_MS));
+			timers.push(setTimeout(roll, paced(MOVE_MS)));
 		} else roll();
 	}
 
@@ -191,7 +198,7 @@
 			setTimeout(() => {
 				pending = rest;
 				show(following, true, playNext);
-			}, pauseAfter(game))
+			}, paced(pauseAfter(game)))
 		);
 	}
 

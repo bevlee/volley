@@ -12,6 +12,7 @@ import {
 	leave,
 	newCode,
 	newSeed,
+	nextDeadline,
 	saved,
 	snapshot,
 	teamOf,
@@ -41,7 +42,7 @@ export interface SocketOptions {
 
 type Ack = (reply: { code: string; team: string } | { error: string }) => void;
 
-const ACTIONS = ['serve', 'shot', 'defence', 'rematch'] as const;
+const ACTIONS = ['serve', 'shot', 'defence', 'rematch', 'ready'] as const;
 const NO_NAME = 'Pick a name';
 
 export function attachSockets(http: HttpServer, { store, now = Date.now, sweepMs = 60_000 }: SocketOptions) {
@@ -66,11 +67,11 @@ export function attachSockets(http: HttpServer, { store, now = Date.now, sweepMs
 	function schedule(room: Room) {
 		clearTimeout(timers.get(room.code));
 		timers.delete(room.code);
-		const c = room.clock;
-		if (!c || c.pausedLeft !== undefined || !rooms.has(room.code)) return;
+		const due = nextDeadline(room);
+		if (due === null || !rooms.has(room.code)) return;
 		timers.set(
 			room.code,
-			setTimeout(() => rooms.has(room.code) && apply(room, tick(room, now())), Math.max(0, c.deadline - now()))
+			setTimeout(() => rooms.has(room.code) && apply(room, tick(room, now())), Math.max(0, due - now()))
 		);
 	}
 

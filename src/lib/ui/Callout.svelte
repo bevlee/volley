@@ -29,7 +29,7 @@
 		width: max-content;
 		max-width: 92%;
 		/* Pops in, then stays until the next step replaces or clears it. */
-		animation: pop 450ms cubic-bezier(0.2, 0.9, 0.3, 1.2) forwards;
+		animation: pop calc(450ms * var(--pace, 1)) cubic-bezier(0.2, 0.9, 0.3, 1.2) forwards;
 	}
 	.text {
 		font-size: clamp(1.1rem, 10cqi, 2.6rem);
@@ -66,7 +66,7 @@
 	}
 	/* A tip's callout drifts down into place, like the ball, instead of punching in. */
 	.float {
-		animation: float 800ms cubic-bezier(0.25, 0.8, 0.3, 1) forwards;
+		animation: float calc(800ms * var(--pace, 1)) cubic-bezier(0.25, 0.8, 0.3, 1) forwards;
 	}
 	@keyframes float {
 		0% {

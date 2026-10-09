@@ -4,7 +4,7 @@ import { io as connectClient, type Socket } from 'socket.io-client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { replayGame } from '../engine/replay';
 import type { Game } from '../engine/types';
-import type { ToClient } from './room';
+import { CLOCK_MS, type ToClient } from './room';
 import { attachSockets } from './sockets';
 import { memoryStore, type GameStore } from './store';
 
@@ -118,6 +118,16 @@ describe('sockets', () => {
 		defender.emit('defence', { at: atCall.steps, block: 'line', stance: 'short' });
 		const after = (await revealed).chain;
 		expect(after[0].log.find((e) => e.tag === 'calls' && e.rally === atCall.rally)?.data).toMatchObject({ shot: 'tip', block: 'line', stance: 'short' });
+	});
+
+	it("starts a player's clock when their screen says it has caught up", async () => {
+		const { url } = await startServer();
+		const { b } = await pair(url);
+		// B serves first; until B's screen is ready, the server holds more than a full clock.
+		expect(b.got.snapshot!.at(-1)!.clock!.msLeft).toBeGreaterThan(CLOCK_MS);
+		const clock = b.next('clock');
+		b.emit('ready', { at: 0 });
+		expect((await clock).clock!.msLeft).toBeLessThanOrEqual(CLOCK_MS);
 	});
 
 	it('shows both names to both players', async () => {

@@ -50,6 +50,8 @@ export class Online {
 	savedId = $state<string | null>(null);
 
 	private socket: Socket;
+	/** The last step this screen said it had caught up with, so it says so once per step. */
+	private readyAt = -1;
 
 	constructor(private handlers: Handlers) {
 		this.socket = io({ auth: { playerId: playerId() }, transports: ['websocket', 'polling'] });
@@ -77,6 +79,8 @@ export class Online {
 			this.setClock(m.clock);
 			this.latest = m.game;
 			this.savedId = m.savedId;
+			// A snapshot after reconnecting may be for a step already reported; say so again.
+			this.readyAt = -1;
 			this.stage = m.opponent === 'waiting' && m.game.steps === 0 ? 'waiting' : 'playing';
 			this.handlers.snapshot(m.game);
 		});
@@ -168,6 +172,16 @@ export class Online {
 	defence(at: number, d: { block: Channel; stance: Stance }) {
 		this.act('defence', { at, ...d });
 		if (this.team) this.locked.push(this.team);
+	}
+
+	/**
+	 * The court has played out everything up to step `at`. The server starts this player's clock
+	 * only then, so each player can watch at their own speed.
+	 */
+	ready(at: number) {
+		if (at === this.readyAt) return;
+		this.readyAt = at;
+		this.act('ready', { at });
 	}
 
 	askRematch() {
