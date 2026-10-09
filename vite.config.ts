@@ -37,6 +37,8 @@ export default defineConfig({
 		}),
 		sockets()
 	],
+	// The dev server in volley-dev sits behind Traefik at this host; Vite refuses unknown hosts.
+	server: { allowedHosts: ['volley-dev.bevsoft.com'] },
 	test: {
 		expect: { requireAssertions: true },
 		projects: [
