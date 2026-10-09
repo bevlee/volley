@@ -11,4 +11,5 @@
 	{#snippet art()}<CourtLoop />{/snippet}
 	<a class="choice" href="/computer"><b>Play vs computer</b></a>
 	<a class="choice" href="/online"><b>Play vs opponent</b></a>
+	<a class="choice" href="/history"><b>Your games</b><span>Watch your finished games again.</span></a>
 </Menu>

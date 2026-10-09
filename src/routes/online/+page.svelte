@@ -10,6 +10,7 @@
 	import GameScreen from '#lib/ui/GameScreen.svelte';
 	import Menu from '#lib/ui/Menu.svelte';
 	import NameField from '#lib/ui/NameField.svelte';
+	import SavedLine from '#lib/ui/SavedLine.svelte';
 	import { NAME_MAX } from '#lib/online/names.ts';
 	import TurnClock from '#lib/ui/TurnClock.svelte';
 
@@ -143,6 +144,7 @@
 		initial={online.latest}
 		controlled={you}
 		{you}
+		bottom={you ?? 'A'}
 		names={online.names}
 		opponent={online.opponent}
 		locked={mineIn}
@@ -166,6 +168,9 @@
 		{/snippet}
 		{#snippet dock()}
 			{#if idle}<TurnClock clock={online.clock} {you} {them} />{/if}
+			{#if idle && g?.phase.kind === 'gameOver'}
+				<SavedLine save={online.savedId ? { kind: 'saved', id: online.savedId } : { kind: 'saving' }} />
+			{/if}
 		{/snippet}
 	</GameScreen>
 {:else if online.stage === 'waiting'}

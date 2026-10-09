@@ -361,3 +361,29 @@ describe('halfBox', () => {
 		expect(halfBox('A')).toEqual({ x: 15, y: 285, w: 270, h: 260 });
 	});
 });
+
+describe('the viewer’s side at the bottom', () => {
+	/** Turning the court half a turn about its centre. */
+	const turned = (p: { x: number; y: number }) => ({ x: 300 - p.x, y: 560 - p.y });
+
+	it('draws B at the bottom as the usual court turned half a turn', () => {
+		for (const team of ['A', 'B'] as const) {
+			for (const zone of [1, 2, 3, 4, 5, 6] as const) {
+				expect(zoneCenter(team, zone, 'B')).toEqual(turned(zoneCenter(team, zone)));
+				for (const shot of ['line', 'cross', 'tip'] as const) expect(shotPoint(team, zone, shot, 'B')).toEqual(turned(shotPoint(team, zone, shot)));
+			}
+		}
+	});
+
+	it('puts the ball, the block and callouts in the same turned places at every step of a game', () => {
+		let g: Game = newGame(7);
+		for (let i = 0; i < 400 && g.phase.kind !== 'gameOver'; i++) {
+			g = step(g);
+			const pos = positions(g);
+			expect(ballAt(g, pos, 'B')).toEqual(turned(ballAt(g, pos)));
+			const hands = blockHands(g, pos);
+			expect(blockHands(g, pos, 'B')).toEqual(hands && turned(hands));
+			for (const team of ['A', 'B'] as const) expect(calloutTop(team, pos, 'B')).toBeCloseTo(100 - calloutTop(team, pos));
+		}
+	});
+});

@@ -21,6 +21,7 @@
 		initial,
 		controlled,
 		you = null,
+		bottom = 'A',
 		names = null,
 		opponent = null,
 		shown = $bindable(),
@@ -46,6 +47,8 @@
 		controlled: TeamId | null;
 		/** Online, the player's team, marked "you" in the score. */
 		you?: TeamId | null;
+		/** The team drawn in the bottom half: the viewer's own side (A unless they played B). */
+		bottom?: TeamId;
 		/** Online, each team's player's name, for the score. */
 		names?: Record<TeamId, string | null> | null;
 		/** Online, whether the other player is connected. */
@@ -154,7 +157,7 @@
 			!animate || next.steps < dice.key || stepEntries(next).some((e) => ['rallyStart', 'serve', 'hit', 'swing'].includes(e.tag ?? ''));
 		const place = (at: Positions) => [
 			...(fresh ? [] : dice.items),
-			...placeDice(next.rolls, at).map((d) => ({ ...d, step: next.steps }))
+			...placeDice(next.rolls, at, bottom).map((d) => ({ ...d, step: next.steps }))
 		];
 		const finish = () => {
 			staged = null;
@@ -166,8 +169,8 @@
 			return finish();
 		}
 		const rollAt = rollPositions(from, next.rolls);
-		const ballDuringRoll = rollBall(from, next.rolls, rollAt);
-		const mustMove = !same(rollAt, positions(from)) || !same(ballDuringRoll, ballAt(from, positions(from)));
+		const ballDuringRoll = rollBall(from, next.rolls, rollAt, bottom);
+		const mustMove = !same(rollAt, positions(from)) || !same(ballDuringRoll, ballAt(from, positions(from), bottom));
 		const roll = () => {
 			dice = { key: next.steps, items: place(rollAt) };
 			timers.push(setTimeout(finish, RESOLVE_MS));
@@ -300,6 +303,7 @@
 		game={view}
 		{dice}
 		{staged}
+		{bottom}
 		preview={choosing ? (preview ?? shotPick) : null}
 		defencePreview={defending ? defence : null}
 		onshot={choosing ? choose : null}

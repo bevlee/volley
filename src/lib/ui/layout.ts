@@ -14,23 +14,26 @@ export interface Point {
 	y: number;
 }
 
-/** A zone's rectangle. A faces up from the bottom; B is mirrored at the top. */
-export function zoneBox(team: TeamId, zone: Zone) {
+/**
+ * A zone's rectangle. The `bottom` team faces up from the bottom of the screen; the other team is
+ * mirrored at the top. A is at the bottom unless the viewer played B (online, or their replay).
+ */
+export function zoneBox(team: TeamId, zone: Zone, bottom: TeamId = 'A') {
 	const [row, col] = GRID[zone];
-	if (team === 'A') return { x: 15 + col * COL, y: 285 + row * ROW, w: COL, h: ROW };
+	if (team === bottom) return { x: 15 + col * COL, y: 285 + row * ROW, w: COL, h: ROW };
 	return { x: 15 + (2 - col) * COL, y: 145 - row * ROW, w: COL, h: ROW };
 }
 
 /** A team's whole half of the court: the box around its six zones. */
-export function halfBox(team: TeamId) {
-	const boxes = ZONES.map((z) => zoneBox(team, z));
+export function halfBox(team: TeamId, bottom: TeamId = 'A') {
+	const boxes = ZONES.map((z) => zoneBox(team, z, bottom));
 	const x = Math.min(...boxes.map((b) => b.x));
 	const y = Math.min(...boxes.map((b) => b.y));
 	return { x, y, w: Math.max(...boxes.map((b) => b.x + b.w)) - x, h: Math.max(...boxes.map((b) => b.y + b.h)) - y };
 }
 
-export function zoneCenter(team: TeamId, zone: Zone): Point {
-	const b = zoneBox(team, zone);
+export function zoneCenter(team: TeamId, zone: Zone, bottom: TeamId = 'A'): Point {
+	const b = zoneBox(team, zone, bottom);
 	return { x: b.x + b.w / 2, y: b.y + b.h / 2 };
 }
 
@@ -41,12 +44,12 @@ const LINE_INSET = 12;
  * Where a shot is drawn going to in a zone. A line shot runs straight down the sideline, so in the
  * sideline column it sits just inside the line; anything else aims at the middle of the zone.
  */
-export function shotPoint(team: TeamId, zone: Zone, shot: Shot): Point {
-	const c = zoneCenter(team, zone);
+export function shotPoint(team: TeamId, zone: Zone, shot: Shot, bottom: TeamId = 'A'): Point {
+	const c = zoneCenter(team, zone, bottom);
 	if (shot !== 'line' || GRID[zone][1] !== GRID[TARGET.line][1]) return c;
-	const b = zoneBox(team, zone);
-	// The line column is on the right of the screen for A and, mirrored, on the left for B.
-	return { x: team === 'A' ? b.x + b.w - LINE_INSET : b.x + LINE_INSET, y: c.y };
+	const b = zoneBox(team, zone, bottom);
+	// The line column is on the right of the screen for the bottom team and, mirrored, on the left for the top.
+	return { x: team === bottom ? b.x + b.w - LINE_INSET : b.x + LINE_INSET, y: c.y };
 }
 
 export type Positions = Record<TeamId, Record<Slot, Zone>>;
@@ -149,13 +152,13 @@ export interface PlacedDie extends Roll {
 }
 
 /** Each player's dice in a centred row under their zone centre, i.e. on the tile where they rolled. */
-export function placeDice(rolls: Roll[], pos: Positions): PlacedDie[] {
+export function placeDice(rolls: Roll[], pos: Positions, bottom: TeamId = 'A'): PlacedDie[] {
 	const placed: PlacedDie[] = [];
 	for (const team of ['A', 'B'] as const) {
 		for (const slot of ['blocker', 'defender'] as const) {
 			const mine = rolls.filter((r) => r.team === team && r.slot === slot);
 			if (!mine.length) continue;
-			const c = zoneCenter(team, pos[team][slot]);
+			const c = zoneCenter(team, pos[team][slot], bottom);
 			const width = mine.length * DIE_SIZE + (mine.length - 1) * DIE_GAP;
 			mine.forEach((r, i) =>
 				placed.push({ ...r, x: c.x - width / 2 + i * (DIE_SIZE + DIE_GAP), y: c.y + 26 })
@@ -174,71 +177,71 @@ export function roleOf(g: Game, team: TeamId, slot: Slot): Role {
 	return slot === 'blocker' ? 'Blocker' : 'Defender';
 }
 
-export function ballAt(g: Game, pos: Positions): Point {
+export function ballAt(g: Game, pos: Positions, bottom: TeamId = 'A'): Point {
 	if (g.phase.kind === 'serve') {
 		const team = g.phase.team;
-		return zoneCenter(team, pos[team][g.servers[team]]);
+		return zoneCenter(team, pos[team][g.servers[team]], bottom);
 	}
 	if (g.phase.kind === 'freeBall') {
 		const team = g.phase.team;
-		return zoneCenter(team, pos[team][config.freeBallReceiver]);
+		return zoneCenter(team, pos[team][config.freeBallReceiver], bottom);
 	}
 	const a = g.attack;
 	if (!a) return { x: VIEW.width / 2, y: VIEW.netY };
 	// A touched ball stays up at the net with the blocker, ready for their partner to set.
-	if (g.phase.kind === 'touched') return zoneCenter(other(a.team), pos[other(a.team)].blocker);
+	if (g.phase.kind === 'touched') return zoneCenter(other(a.team), pos[other(a.team)].blocker, bottom);
 	// A stuffed ball comes off the block and drops just in front of the hitter, on their side of the net.
 	if (stepEntries(g).some((e) => e.tag === 'point' && e.data?.kind === 'stuff')) {
-		return { x: blockHandsX(g, pos), y: VIEW.netY + (a.team === 'A' ? STUFF_DROP : -STUFF_DROP) };
+		return { x: blockHandsX(g, pos, bottom), y: VIEW.netY + (a.team === bottom ? STUFF_DROP : -STUFF_DROP) };
 	}
 	// A hitting error (two 1s) goes into the net in front of the hitter.
 	const entries = stepEntries(g);
 	if (entries.some((e) => e.tag === 'swing') && entries.some((e) => e.tag === 'point' && e.data?.kind === 'shank')) {
-		const hitterX = zoneCenter(a.team, pos[a.team][a.hitter]).x;
-		return { x: hitterX, y: VIEW.netY + (a.team === 'A' ? STUFF_DROP : -STUFF_DROP) };
+		const hitterX = zoneCenter(a.team, pos[a.team][a.hitter], bottom).x;
+		return { x: hitterX, y: VIEW.netY + (a.team === bottom ? STUFF_DROP : -STUFF_DROP) };
 	}
-	if (a.landing) return zoneCenter(other(a.team), a.landing);
+	if (a.landing) return zoneCenter(other(a.team), a.landing, bottom);
 	// Before the set the ball stays with the passer or digger; after it, it's with the hitter.
-	return zoneCenter(a.team, pos[a.team][a.hitter]);
+	return zoneCenter(a.team, pos[a.team][a.hitter], bottom);
 }
 
 /** How far from the net a stuffed ball lands. */
 const STUFF_DROP = 22;
 
-const blockHandsX = (g: Game, pos: Positions) => {
+const blockHandsX = (g: Game, pos: Positions, bottom: TeamId) => {
 	const defending = other(g.attack!.team);
-	return zoneCenter(defending, pos[defending].blocker).x;
+	return zoneCenter(defending, pos[defending].blocker, bottom).x;
 };
 
 /**
  * Where a blocked ball meets the block, if the latest step had a stuff or a touch: the blocker's
  * hands, on the net in front of them. The ball flies there first, then on to where it ends up.
  */
-export function blockHands(g: Game, pos: Positions): Point | null {
+export function blockHands(g: Game, pos: Positions, bottom: TeamId = 'A'): Point | null {
 	const block = stepEntries(g).find((e) => e.tag === 'block');
 	if (!g.attack || !block || block.data?.result === 'clean') return null;
-	return { x: blockHandsX(g, pos), y: VIEW.netY };
+	return { x: blockHandsX(g, pos, bottom), y: VIEW.netY };
 }
 
 /** Where the ball is while a step's dice roll: on a pass or set it goes to that player at their spot. */
-export function rollBall(before: Game, rolls: Roll[], rollPos: Positions): Point {
+export function rollBall(before: Game, rolls: Roll[], rollPos: Positions, bottom: TeamId = 'A'): Point {
 	const touch = rolls.find((r) => r.label === 'set' || r.label === 'pass');
-	return touch ? zoneCenter(touch.team, rollPos[touch.team][touch.slot]) : ballAt(before, rollPos);
+	return touch ? zoneCenter(touch.team, rollPos[touch.team][touch.slot], bottom) : ballAt(before, rollPos, bottom);
 }
 
-/** Candidate heights for a callout in each team's half, net side to baseline (viewBox units). */
-const CALLOUT_BANDS: Record<TeamId, number[]> = { A: [320, 415, 515], B: [240, 145, 45] };
+/** Candidate heights for a callout in the bottom and top halves, net side to baseline (viewBox units). */
+const CALLOUT_BANDS = { bottom: [320, 415, 515], top: [240, 145, 45] };
 
 /**
  * Where to put a callout for `team`, as a % of the court's height: the band of their half that is
  * furthest from any player, so the headline never sits on the players who just made the play.
  */
-export function calloutTop(team: TeamId, pos: Positions): number {
+export function calloutTop(team: TeamId, pos: Positions, bottom: TeamId = 'A'): number {
 	const chipYs = (['A', 'B'] as const).flatMap((t) =>
-		(['blocker', 'defender'] as const).map((slot) => zoneCenter(t, pos[t][slot]).y)
+		(['blocker', 'defender'] as const).map((slot) => zoneCenter(t, pos[t][slot], bottom).y)
 	);
 	const clearance = (y: number) => Math.min(...chipYs.map((c) => Math.abs(c - y)));
-	const best = CALLOUT_BANDS[team].reduce((a, b) => (clearance(b) > clearance(a) ? b : a));
+	const best = CALLOUT_BANDS[team === bottom ? 'bottom' : 'top'].reduce((a, b) => (clearance(b) > clearance(a) ? b : a));
 	return (100 * best) / VIEW.height;
 }
 

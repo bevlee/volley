@@ -8,6 +8,7 @@
 	let {
 		player,
 		team,
+		near = team === 'A',
 		role,
 		x,
 		y,
@@ -18,6 +19,8 @@
 	}: {
 		player: Player;
 		team: TeamId;
+		/** In the bottom half of the court, facing up the screen. */
+		near?: boolean;
 		role: Role;
 		x: number;
 		y: number;
@@ -34,8 +37,8 @@
 	/** Three short lines (name, role, stats): a character's name and role don't fit on one line. */
 	const H = 46;
 	const pos = Tween.of(() => ({ x, y }), { duration: 350, easing: cubicOut });
-	// Team B faces down the screen, so their dives lunge the other way.
-	const facing = $derived(team === 'A' ? -1 : 1);
+	// The top team faces down the screen, so their dives lunge the other way.
+	const facing = $derived(near ? -1 : 1);
 </script>
 
 <g class="chip {team}" class:hitter transform="translate({pos.current.x - W / 2} {pos.current.y - H / 2})">

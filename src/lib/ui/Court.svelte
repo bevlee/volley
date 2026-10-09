@@ -38,7 +38,8 @@
 		preview = null,
 		defencePreview = null,
 		onshot = null,
-		onpreview = () => {}
+		onpreview = () => {},
+		bottom = 'A'
 	}: {
 		game: Game;
 		/** Each die carries the step it was rolled in: earlier ones in the possession stay, faded. */
@@ -53,6 +54,8 @@
 		onshot?: ((shot: Shot) => void) | null;
 		/** Hovering or focusing a target zone previews that shot; null when it stops. */
 		onpreview?: (shot: Shot | null) => void;
+		/** The team drawn in the bottom half: the viewer's own side. */
+		bottom?: TeamId;
 	} = $props();
 
 	const SHOTS: Shot[] = ['line', 'cross', 'tip'];
@@ -70,7 +73,7 @@
 	const defending = $derived(a ? other(a.team) : null);
 	const calledShot = $derived(a?.calls?.shot ?? preview);
 	const target = $derived(calledShot && a ? TARGET[calledShot] : null);
-	const ballTarget = $derived(staged?.ball ?? ballAt(game, pos));
+	const ballTarget = $derived(staged?.ball ?? ballAt(game, pos, bottom));
 	/** What the defence covers, once it's called or while the player sets theirs up. */
 	const covers = $derived.by(() => {
 		const d = a?.calls ?? defencePreview;
@@ -78,7 +81,7 @@
 	});
 	/** Where a shot's tag sits: across the top of its target zone, above the player's action label. */
 	const tagAt = (team: TeamId, shot: Shot) => {
-		const b = zoneBox(team, TARGET[shot]);
+		const b = zoneBox(team, TARGET[shot], bottom);
 		return { x: b.x + b.w / 2, y: b.y + 14 };
 	};
 
@@ -96,15 +99,15 @@
 	const ballSpot = $derived.by(() => {
 		// A stuffed or netted ball is loose on the floor, not held by anyone.
 		if ((stuffed || netted) && !staged) return ballTarget;
-		const landed = a?.calls && a.landing && !stopped && !staged ? zoneCenter(other(a.team), a.landing) : null;
-		const onLine = landed && a?.calls ? shotPoint(other(a.team), a.landing!, a.calls.shot) : null;
+		const landed = a?.calls && a.landing && !stopped && !staged ? zoneCenter(other(a.team), a.landing, bottom) : null;
+		const onLine = landed && a?.calls ? shotPoint(other(a.team), a.landing!, a.calls.shot, bottom) : null;
 		if (landed && onLine && onLine.x !== landed.x && ballTarget.x === landed.x && ballTarget.y === landed.y) {
 			return { x: onLine.x, y: onLine.y + BALL_OFFSET.y };
 		}
 		return { x: ballTarget.x + BALL_OFFSET.x, y: ballTarget.y + BALL_OFFSET.y };
 	});
 	/** A blocked ball goes into the blocker's hands at the net before it ends up where it lands. */
-	const via = $derived(staged ? null : blockHands(game, pos));
+	const via = $derived(staged ? null : blockHands(game, pos, bottom));
 	let flight = $state.raw(untrack(() => ({ from: ballSpot, to: ballSpot, apex: 0 })));
 	/** Where the ball is headed; with a block, the flight's first leg ends short of it. */
 	let heading = untrack(() => ballSpot);
@@ -177,20 +180,20 @@
 		const stop = setTimeout(() => (impact = null), IMPACT_MS[next]);
 		return () => clearTimeout(stop);
 	});
-	/** A stuff block jolts the court toward the hitter's side: down for A (bottom), up for B. */
-	const slamDir = $derived(a?.team === 'B' ? -1 : 1);
+	/** A stuff block jolts the court toward the hitter's side: down for the bottom team, up for the top. */
+	const slamDir = $derived(a && a.team !== bottom ? -1 : 1);
 
 	// Intended shot: dashed, from the hitter to the called zone. Actual shot: solid, to where it landed.
 	// A line shot runs straight down the sideline, so both arrows start on that line too.
 	const shot = $derived.by(() => {
 		if (!a || !calledShot) return null;
 		const d = other(a.team);
-		const intended = shotPoint(d, TARGET[calledShot], calledShot);
-		const hitter = zoneCenter(a.team, pos[a.team][a.hitter]);
+		const intended = shotPoint(d, TARGET[calledShot], calledShot, bottom);
+		const hitter = zoneCenter(a.team, pos[a.team][a.hitter], bottom);
 		return {
 			from: calledShot === 'line' ? { x: intended.x, y: hitter.y } : hitter,
 			intended,
-			actual: a.landing && !stopped ? shotPoint(d, a.landing, calledShot) : null
+			actual: a.landing && !stopped ? shotPoint(d, a.landing, calledShot, bottom) : null
 		};
 	});
 
@@ -199,13 +202,14 @@
 	const blockBar = $derived.by(() => {
 		const block = a?.calls?.block ?? defencePreview?.block;
 		if (!block || !defending) return null;
-		const box = zoneBox(defending, 2);
+		const box = zoneBox(defending, 2, bottom);
 		const half = box.w / 2;
-		// Zone 2 is on the left of the screen for B (mirrored) and on the right for A.
-		const sidelineHalf = defending === 'B' ? box.x : box.x + half;
-		const middleHalf = defending === 'B' ? box.x + half : box.x;
+		// Zone 2 is on the right of the screen for the bottom team and, mirrored, on the left for the top.
+		const near = defending === bottom;
+		const sidelineHalf = near ? box.x + half : box.x;
+		const middleHalf = near ? box.x : box.x + half;
 		const x = (block === 'line' ? sidelineHalf : middleHalf) + 4;
-		return { x, y: defending === 'A' ? VIEW.netY + 6 : VIEW.netY - 12, w: half - 8, label: block };
+		return { x, y: near ? VIEW.netY + 6 : VIEW.netY - 12, w: half - 8, label: block, near };
 	});
 </script>
 
@@ -223,7 +227,7 @@
 
 		{#each TEAMS as team (team)}
 			{#each ZONES as zone (zone)}
-				{@const b = zoneBox(team, zone)}
+				{@const b = zoneBox(team, zone, bottom)}
 				<rect
 					class="zone"
 					class:landing={team === defending && zone === a?.landing && !stopped}
@@ -238,7 +242,7 @@
 
 		{#if defending && covers}
 			{#each SHOTS as s (s)}
-				{@const b = zoneBox(defending, TARGET[s])}
+				{@const b = zoneBox(defending, TARGET[s], bottom)}
 				{@const tag = tagAt(defending, s)}
 				<rect class="cover {covers[s]}" x={b.x + 1} y={b.y + 1} width={b.w - 2} height={b.h - 2} />
 				<text class="cover-tag {covers[s]}" x={tag.x} y={tag.y}>
@@ -254,12 +258,12 @@
 		{/if}
 
 		{#if defending && target}
-			{@const t = zoneBox(defending, target)}
+			{@const t = zoneBox(defending, target, bottom)}
 			<rect class="target" x={t.x + 3} y={t.y + 3} width={t.w - 6} height={t.h - 6} rx="4" />
 		{/if}
 
 		{#if pointTo}
-			{@const h = halfBox(other(pointTo))}
+			{@const h = halfBox(other(pointTo), bottom)}
 			{#key game.steps}
 				<rect class="point-tint" x={h.x} y={h.y} width={h.w} height={h.h} />
 				<rect class="point-trace" x={h.x + 1} y={h.y + 1} width={h.w - 2} height={h.h - 2} rx="3" pathLength="100" />
@@ -269,7 +273,7 @@
 		<rect class="net" x="8" y={VIEW.netY - 4} width={VIEW.width - 16} height="8" />
 		{#if blockBar}
 			<rect class="block" x={blockBar.x} y={blockBar.y} width={blockBar.w} height="6" rx="2" />
-			<text class="block-label" x={blockBar.x + blockBar.w / 2} y={defending === 'A' ? blockBar.y + 16 : blockBar.y - 4}>
+			<text class="block-label" x={blockBar.x + blockBar.w / 2} y={blockBar.near ? blockBar.y + 16 : blockBar.y - 4}>
 				blocks {blockBar.label}
 			</text>
 		{/if}
@@ -303,10 +307,11 @@
 
 		{#each TEAMS as team (team)}
 			{#each ['blocker', 'defender'] as const as slot (slot)}
-				{@const at = zoneCenter(team, pos[team][slot])}
+				{@const at = zoneCenter(team, pos[team][slot], bottom)}
 				<PlayerChip
 					player={game.teams[team][slot]}
 					{team}
+					near={team === bottom}
 					role={roleOf(game, team, slot)}
 					x={at.x}
 					y={at.y}
@@ -354,7 +359,7 @@
 
 		{#if defending && onshot}
 			{#each SHOTS as s (s)}
-				{@const b = zoneBox(defending, TARGET[s])}
+				{@const b = zoneBox(defending, TARGET[s], bottom)}
 				<rect
 					class="pick-zone"
 					role="button"
@@ -379,7 +384,7 @@
 			{/each}
 		{/if}
 	</svg>
-	<CalloutView callout={moment} top={moment ? calloutTop(moment.team, pos) : 50} />
+	<CalloutView callout={moment} top={moment ? calloutTop(moment.team, pos, bottom) : 50} />
 	</div>
 </figure>
 

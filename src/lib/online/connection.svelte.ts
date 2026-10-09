@@ -1,5 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import type { Channel, Game, Shot, Stance, TeamId } from '../engine/types';
+import { playerId, savedName, saveName } from './identity';
 import { cleanName } from './names';
 import type { Action, ClockView, Names, Presence, ToClient } from './protocol';
 
@@ -7,42 +8,6 @@ import type { Action, ClockView, Names, Presence, ToClient } from './protocol';
  * The browser's side of an online game: one Socket.IO connection, what the server has said, and
  * the player's moves. The page decides what to show; this only keeps the state.
  */
-
-const PLAYER_KEY = 'volley.playerId';
-const NAME_KEY = 'volley.name';
-
-/**
- * This browser's player id, made on first use. It's the key to the player's seat and history, so
- * it's kept in localStorage; if that's blocked, it lasts as long as the page.
- */
-export function playerId(): string {
-	try {
-		const saved = localStorage.getItem(PLAYER_KEY);
-		if (saved) return saved;
-		const id = crypto.randomUUID();
-		localStorage.setItem(PLAYER_KEY, id);
-		return id;
-	} catch {
-		return crypto.randomUUID();
-	}
-}
-
-/** The name this browser last played under, or '' if it's never had one. */
-function savedName(): string {
-	try {
-		return cleanName(localStorage.getItem(NAME_KEY) ?? '');
-	} catch {
-		return '';
-	}
-}
-
-function saveName(name: string) {
-	try {
-		localStorage.setItem(NAME_KEY, name);
-	} catch {
-		// Blocked storage: the name lasts as long as the page.
-	}
-}
 
 export type Stage = 'connecting' | 'offline' | 'menu' | 'waiting' | 'playing';
 
@@ -81,6 +46,8 @@ export class Online {
 	rematch = $state<TeamId[]>([]);
 	/** The latest game the server has sent. */
 	latest = $state.raw<Game | null>(null);
+	/** The finished game's id once the server has saved it, for its replay. */
+	savedId = $state<string | null>(null);
 
 	private socket: Socket;
 
@@ -109,6 +76,7 @@ export class Online {
 			this.rematch = [];
 			this.setClock(m.clock);
 			this.latest = m.game;
+			this.savedId = m.savedId;
 			this.stage = m.opponent === 'waiting' && m.game.steps === 0 ? 'waiting' : 'playing';
 			this.handlers.snapshot(m.game);
 		});
@@ -117,6 +85,7 @@ export class Online {
 			this.latest = m.chain.at(-1)!;
 			this.handlers.chain(m.chain);
 		});
+		on('saved', (m) => (this.savedId = m.id));
 		on('presence', (m) => (this.opponent = m.opponent));
 		on('names', (m) => (this.names = m.names));
 		on('locked', (m) => {
@@ -135,7 +104,7 @@ export class Online {
 
 	private reset() {
 		this.stage = 'menu';
-		this.code = this.team = this.latest = this.clock = null;
+		this.code = this.team = this.latest = this.clock = this.savedId = null;
 		this.opponent = 'waiting';
 		this.names = { A: null, B: null };
 		this.locked = [];
