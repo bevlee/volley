@@ -35,6 +35,35 @@ spec:
             - name: http
               containerPort: 5173
               protocol: TCP
+          env:
+            # Saved games go to Postgres (database volley_dev, never production's volley). The
+            # Secret is required, not optional: without it the pod fails to start rather than
+            # falling back to games in memory.
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: volley-dev-db
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: volley-dev-db
+                  key: port
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: volley-dev-db
+                  key: database
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: volley-dev-db
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: volley-dev-db
+                  key: password
           securityContext:
             allowPrivilegeEscalation: false
             # The dev server writes caches and Skaffold syncs source files in,

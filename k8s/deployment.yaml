@@ -40,9 +40,33 @@ spec:
               value: X-Forwarded-For
             - name: XFF_DEPTH
               value: "1"
-            # No PGHOST: games are kept in memory until the database is set up. Then add PGHOST
-            # (<service>.db.svc.cluster.local), PGDATABASE (volley), and PGUSER / PGPASSWORD from
-            # the Secret mirrored into this namespace.
+            # Saved games go to Postgres (database volley). The Secret is required, not optional:
+            # without it the pod fails to start rather than falling back to games in memory.
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: volley-db
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: volley-db
+                  key: port
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: volley-db
+                  key: database
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: volley-db
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: volley-db
+                  key: password
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
