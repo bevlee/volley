@@ -78,7 +78,11 @@ async function pair(url: string) {
 	const a = player(url);
 	const b = player(url);
 	await Promise.all([connected(a), connected(b)]);
+	// The server acks the create before it sends A's first snapshot: take that one first, or the
+	// wait below can pick it up instead of the snapshot that comes with B joining.
+	const created = a.next('snapshot');
 	const { code } = (await a.ask('create', 'Ann')) as { code: string };
+	await created;
 	const joined = Promise.all([a.next('snapshot'), b.next('snapshot')]);
 	expect(await b.ask('join', code.toLowerCase(), '  Bo  ')).toEqual({ code, team: 'B' });
 	await joined;
