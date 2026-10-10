@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { config } from '#lib/engine/config.ts';
 	import CourtLoop from '#lib/ui/CourtLoop.svelte';
 	import Menu from '#lib/ui/Menu.svelte';
 </script>
@@ -7,7 +8,7 @@
 	<title>Volley</title>
 </svelte:head>
 
-<Menu title="Volley" subtitle="2v2 beach volleyball with dice. First to 21, win by 2.">
+<Menu title="Volley" subtitle="2v2 beach volleyball with dice. First to {config.targetScore}, win by {config.winBy}.">
 	{#snippet art()}<CourtLoop />{/snippet}
 	<a class="choice" href="/computer"><b>Play vs computer</b></a>
 	<a class="choice" href="/online"><b>Play vs opponent</b></a>

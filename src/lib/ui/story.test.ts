@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { config } from '../engine/config';
 import { NUMBERED } from '../engine/lineup';
 import { fixedChoosers } from '../engine/choosers';
 import { newGame, step } from '../engine/rally';
@@ -86,12 +87,13 @@ describe('callout', () => {
 
 	it('calls the end of the game', () => {
 		const start = evenGame();
-		start.score = { A: 20, B: 19 };
-		expect(callout(run(4, line, [4, 6, 6], start))).toMatchObject({ text: 'Team A wins!', sub: '21–19' });
+		const T = config.targetScore;
+		start.score = { A: T - 1, B: T - 2 };
+		expect(callout(run(4, line, [4, 6, 6], start))).toMatchObject({ text: 'Team A wins!', sub: `${T}–${T - 2}` });
 		const bWins = evenGame();
-		bWins.score = { A: 17, B: 20 };
+		bWins.score = { A: T - 4, B: T - 1 };
 		// the winner's score comes first
-		expect(callout(run(2, line, [1, 1], bWins))).toMatchObject({ text: 'Team B wins!', sub: '21–17' });
+		expect(callout(run(2, line, [1, 1], bWins))).toMatchObject({ text: 'Team B wins!', sub: `${T}–${T - 4}` });
 	});
 });
 

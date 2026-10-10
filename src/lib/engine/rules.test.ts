@@ -176,9 +176,10 @@ describe('special dice', () => {
 
 describe('gameWinner', () => {
 	it('needs the target score and a 2-point lead', () => {
-		expect(gameWinner({ A: 21, B: 19 })).toBe('A');
-		expect(gameWinner({ A: 21, B: 20 })).toBeNull();
-		expect(gameWinner({ A: 24, B: 26 })).toBe('B');
-		expect(gameWinner({ A: 20, B: 5 })).toBeNull();
+		const T = config.targetScore;
+		expect(gameWinner({ A: T, B: T - 2 })).toBe('A');
+		expect(gameWinner({ A: T, B: T - 1 })).toBeNull();
+		expect(gameWinner({ A: T + 3, B: T + 5 })).toBe('B');
+		expect(gameWinner({ A: T - 1, B: 0 })).toBeNull();
 	});
 });

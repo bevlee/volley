@@ -1,7 +1,8 @@
 import type { Slot } from './types';
 
 export const config = {
-	targetScore: 21,
+	/** Short games: first to 7, win by 2. */
+	targetScore: 7,
 	winBy: 2,
 	blockBonus: 3,
 	readBonus: 3,
