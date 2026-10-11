@@ -7,7 +7,7 @@ import type { Action, ClockView, FromClient, Names, Presence, ToClient } from '.
 export type { Action, ClockView, FromClient, Names, Presence, ToClient };
 import { CODE_LENGTH, CODE_LETTERS } from '../online/codes';
 import { playsItself } from '../ui/story';
-import { playbackMs } from '../ui/timing';
+import { playbackMs } from '../ui/choreo';
 
 /**
  * One online game between two players, with no sockets: everything a player sends goes through
@@ -193,7 +193,7 @@ export function join(room: Room, playerId: string, name: string, now: number): {
 	room.seats[team] = { playerId, name, connected: true };
 	room.lastActive = now;
 	if (room.clock) resumeClock(room, now);
-	else startClock(room, [], now);
+	else startClock(room, 0, now);
 	return { team, send: [snapshot(room, team, now), snapshot(room, other(team), now)] };
 }
 
@@ -259,11 +259,12 @@ function owed(game: Game): { action: Action; teams: TeamId[] } | null {
 
 /**
  * Sets the clock for whatever `room.game` now waits on. Each team's time starts when its screen has
- * played `chain` out and says so, or at the latest after twice the normal playback plus a grace.
+ * played out what was just sent (`playback` ms at normal pace) and says so, or at the latest after
+ * twice that plus a grace.
  */
-function startClock(room: Room, chain: Game[], now: number) {
+function startClock(room: Room, playback: number, now: number) {
 	const next = owed(room.game);
-	const latest = now + 2 * playbackMs(chain) + READY_GRACE_MS + CLOCK_MS;
+	const latest = now + 2 * playback + READY_GRACE_MS + CLOCK_MS;
 	room.clock = next ? { ...next, deadlines: Object.fromEntries(next.teams.map((t) => [t, latest])), ready: [] } : null;
 	const playing = room.seats.A && room.seats.B && (room.seats.A.connected || room.seats.B.connected);
 	if (!playing) pauseClock(room, now);
@@ -275,14 +276,15 @@ function startClock(room: Room, chain: Game[], now: number) {
  * game over.
  */
 function advance(room: Room, choosers: Choosers, now: number): Outcome {
-	const chain = [step(room.game, choosers)];
+	const before = room.game;
+	const chain = [step(before, choosers)];
 	let g = chain[0];
 	if (g.phase.kind === 'hit') chain.push((g = step(g)));
 	while (playsItself(g)) chain.push((g = step(g)));
 	room.game = g;
 	room.pending = {};
 	room.lastActive = now;
-	startClock(room, chain, now);
+	startClock(room, playbackMs(before, chain), now);
 	const send = [
 		...out('both', { event: 'states', chain: chain.map(redact) }),
 		...clocks(room, now)
@@ -414,6 +416,6 @@ function rematch(room: Room, team: TeamId, now: number, seed: () => number): Out
 	room.rematch = [];
 	room.savedId = null;
 	room.lastActive = now;
-	startClock(room, [], now);
+	startClock(room, 0, now);
 	return { send: [snapshot(room, 'A', now), snapshot(room, 'B', now)] };
 }

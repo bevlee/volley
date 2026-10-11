@@ -4,7 +4,7 @@ import { step } from '../engine/rally';
 import { replayGame } from '../engine/replay';
 import type { Calls, Game, TeamId } from '../engine/types';
 import { playsItself } from '../ui/story';
-import { playbackMs } from '../ui/timing';
+import { playbackMs } from '../ui/choreo';
 import {
 	act,
 	CLOCK_MS,
@@ -138,7 +138,7 @@ describe('serving', () => {
 		const chain = msgs(served.send, 'states')[0].chain;
 		expect(chain.map((g) => g.phase.kind)).toEqual(['freeBall', 'set', 'calls']);
 		// Without a word from either screen, the time starts after twice the normal playback and a grace.
-		const latest = 1000 + 2 * playbackMs(chain) + READY_GRACE_MS + CLOCK_MS;
+		const latest = 1000 + 2 * playbackMs(seated().game, chain) + READY_GRACE_MS + CLOCK_MS;
 		expect(room.clock).toEqual({
 			action: 'call',
 			teams: [attacker(room), defender(room)],

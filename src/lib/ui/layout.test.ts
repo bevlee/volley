@@ -4,7 +4,10 @@ import { fixedChoosers } from '../engine/choosers';
 import { newGame, playRally, step } from '../engine/rally';
 import type { Game } from '../engine/types';
 import { scriptedDice } from '../engine/rng';
-import { arcPoint, ballAt, blockHands, calloutTop, coverage, flightKind, halfBox, shotPoint, previewDefence, placeDice, positions, rollBall, rollPositions, roleOf, zoneBox, zoneCenter } from './layout';
+
+/** A held ball is drawn at the top corner of the holder's chip. */
+const held = (p: { x: number; y: number }) => ({ x: p.x + 34, y: p.y - 20 });
+import { arcPath, arcPoint, ballAt, ballRest, ballVia, blockBar, calloutTop, coverage, flightKind, halfBox, shotPoint, previewDefence, placeDice, positions, rollBall, rollPositions, roleOf, zoneBox, zoneCenter } from './layout';
 
 describe('placeDice', () => {
 	it('lines up each player’s dice under their zone centre', () => {
@@ -133,7 +136,7 @@ describe('rollPositions', () => {
 		const at = rollPositions(g, rolls);
 		// B2 is already deep in 5, so B1 takes the free ball in the middle of the back court
 		expect(at.B).toEqual({ blocker: 6, defender: 5 });
-		expect(rollBall(g, rolls, at)).toEqual(zoneCenter('B', 6));
+		expect(rollBall(g, rolls, at)).toEqual(held(zoneCenter('B', 6)));
 	});
 
 	it('moves the setter to the setting spot before they roll the set', () => {
@@ -201,10 +204,11 @@ describe('ballAt', () => {
 			scriptedDice([4, 4, 1, 6, 6])
 		);
 		expect(g.log.at(-1)?.data?.kind).toBe('stuff');
-		// in front of the hitter in zone 4, just below the net, after meeting the blocker's hands at the net
-		const hitter = zoneCenter('A', 4);
-		expect(ballAt(g, positions(g))).toEqual({ x: hitter.x, y: 302 });
-		expect(blockHands(g, positions(g))).toEqual({ x: hitter.x, y: 280 });
+		// it meets the line block at the net, then drops just below it on the hitter's side
+		const bar = blockBar('B', 'line');
+		const hands = bar.x + bar.w / 2;
+		expect(ballVia(g, positions(g))).toEqual({ x: hands, y: 280 });
+		expect(ballAt(g, positions(g))).toEqual({ x: hands, y: 302 });
 	});
 
 	it('puts a hitting error into the net in front of the hitter', () => {
@@ -212,6 +216,8 @@ describe('ballAt', () => {
 		const g = playRally(newGame(1, NUMBERED), fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }), scriptedDice([4, 1, 1]));
 		expect(g.log.at(-1)?.data?.kind).toBe('shank');
 		expect(ballAt(g, positions(g))).toEqual({ x: zoneCenter('A', 4).x, y: 302 });
+		// into the net in front of the hitter first
+		expect(ballVia(g, positions(g))).toEqual({ x: zoneCenter('A', 4).x, y: 280 });
 	});
 
 	it('lands a double six on the called target', () => {
@@ -239,13 +245,13 @@ describe('rollBall', () => {
 		before.phase = { kind: 'set' };
 		before.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0 };
 		const rolls = [{ team: 'A' as const, slot: 'defender' as const, die: 5, label: 'set' as const }];
-		expect(rollBall(before, rolls, rollPositions(before, rolls))).toEqual(zoneCenter('A', 3));
+		expect(rollBall(before, rolls, rollPositions(before, rolls))).toEqual(held(zoneCenter('A', 3)));
 	});
 
 	it('leaves the ball where it is for other rolls', () => {
 		const g = step(newGame(1, NUMBERED));
 		const rolls = [{ team: 'A' as const, slot: 'blocker' as const, die: 4, label: 'pass' as const }];
-		expect(rollBall(g, rolls, rollPositions(g, rolls))).toEqual(ballAt(g, positions(g)));
+		expect(rollBall(g, rolls, rollPositions(g, rolls))).toEqual(ballRest(g, positions(g)));
 	});
 });
 
@@ -264,21 +270,27 @@ describe('ball flight', () => {
 
 	it('flies a serve, a spike and a tip differently', () => {
 		const served = step(newGame(1, NUMBERED));
-		expect(flightKind(served, false)).toBe('serve');
+		expect(flightKind(served)).toBe('serve');
 		const stuffed = playRally(
 			newGame(1, NUMBERED),
 			fixedChoosers({ shot: 'line', block: 'line', stance: 'deep' }),
 			scriptedDice([4, 4, 1, 6, 6])
 		);
-		expect(flightKind(stuffed, false)).toBe('spike');
+		expect(flightKind(stuffed)).toBe('spike');
 		const tipped = playRally(
 			newGame(1, NUMBERED),
 			fixedChoosers({ shot: 'tip', block: 'line', stance: 'deep' }),
 			scriptedDice([4, 4, 3, 4, 1])
 		);
-		expect(flightKind(tipped, false)).toBe('tip');
+		expect(flightKind(tipped)).toBe('tip');
 		// a pass or a set floats up high
-		expect(flightKind(served, true)).toBe('lob');
+		expect(flightKind(step(served))).toBe('lob');
+	});
+
+	it('draws a flight part of the way along the same arc the ball flies', () => {
+		expect(arcPath(from, to, 50)).toBe('M 0 100 Q 50 100 100 300');
+		// cut halfway, the path ends where the ball is at its peak
+		expect(arcPath(from, to, 50, 0.5)).toBe('M 0 100 Q 25 100 50 150');
 	});
 });
 
@@ -307,7 +319,7 @@ describe('coverage', () => {
 });
 
 describe('ballAt after a block touch', () => {
-	it('keeps the ball with the blocker at the net, not where the shot was aimed', () => {
+	it('sends the ball off the block to the defender running in to set it, not where the shot was aimed', () => {
 		const g = newGame(1, NUMBERED);
 		g.phase = { kind: 'touched' };
 		g.attack = {
@@ -320,7 +332,9 @@ describe('ballAt after a block touch', () => {
 			landing: 1,
 			blockDie: 5
 		};
-		expect(ballAt(g, positions(g))).toEqual(zoneCenter('B', 2));
+		expect(positions(g).B).toEqual({ blocker: 2, defender: 3 });
+		expect(ballAt(g, positions(g))).toEqual(zoneCenter('B', 3));
+		expect(ballVia(g, positions(g))).toBeNull(); // the step's log has no block entry here
 	});
 });
 
@@ -381,8 +395,8 @@ describe('the viewer’s side at the bottom', () => {
 			g = step(g);
 			const pos = positions(g);
 			expect(ballAt(g, pos, 'B')).toEqual(turned(ballAt(g, pos)));
-			const hands = blockHands(g, pos);
-			expect(blockHands(g, pos, 'B')).toEqual(hands && turned(hands));
+			const via = ballVia(g, pos);
+			expect(ballVia(g, pos, 'B')).toEqual(via && turned(via));
 			for (const team of ['A', 'B'] as const) expect(calloutTop(team, pos, 'B')).toBeCloseTo(100 - calloutTop(team, pos));
 		}
 	});

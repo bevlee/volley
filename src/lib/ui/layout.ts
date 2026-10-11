@@ -3,6 +3,7 @@ import { other, partner } from '../engine/rally';
 import { defenderZone, GRID, isRead, TARGET, ZONES } from '../engine/rules';
 import type { Channel, Game, Roll, Shot, Slot, Stance, TeamId, Zone } from '../engine/types';
 import { stepEntries } from './story';
+import type { FlightKind } from './timing';
 
 /** SVG viewBox is 300 × 560: B's half 15–275, net 275–285, A's half 285–545. */
 export const VIEW = { width: 300, height: 560, netY: 280 };
@@ -98,7 +99,8 @@ export function positions(g: Game): Positions {
 	if (a.calls) {
 		const defending = other(a.team);
 		pos[defending].blocker = 2;
-		pos[defending].defender = defenderZone(a.calls.stance, a.calls.block);
+		// After a block touch the defender runs in to set the ball coming off the block.
+		pos[defending].defender = phase.kind === 'touched' ? SET_SPOT : defenderZone(a.calls.stance, a.calls.block);
 	}
 	// A free ball mid-rally (an easy ball over) keeps the attack's picture, except that the passer
 	// drops back to pass as it comes over, so the ball flies straight to them.
@@ -132,8 +134,11 @@ export function coverage(block: Channel, stance: Stance): Record<Shot, Cover> {
 }
 
 /** Where the players who roll in a step stand to roll: a setter moves to the setting spot first. */
-export function rollPositions(before: Game, rolls: Roll[]): Positions {
-	const pos = positions(before);
+export const rollPositions = (before: Game, rolls: Roll[]): Positions => rollingFrom(positions(before), rolls);
+
+/** Where the rollers stand, starting from `from` (the court as drawn, e.g. a defence being set up). */
+export function rollingFrom(from: Positions, rolls: Roll[]): Positions {
+	const pos: Positions = { A: { ...from.A }, B: { ...from.B } };
 	for (const r of rolls) {
 		const partnerAt = pos[r.team][partner(r.slot)];
 		// If the digger is already on the setting spot, the setter sets from where they are.
@@ -188,18 +193,13 @@ export function ballAt(g: Game, pos: Positions, bottom: TeamId = 'A'): Point {
 	}
 	const a = g.attack;
 	if (!a) return { x: VIEW.width / 2, y: VIEW.netY };
-	// A touched ball stays up at the net with the blocker, ready for their partner to set.
-	if (g.phase.kind === 'touched') return zoneCenter(other(a.team), pos[other(a.team)].blocker, bottom);
+	// A touched ball comes off the block to the defender, who has run in to set it.
+	if (g.phase.kind === 'touched') return zoneCenter(other(a.team), pos[other(a.team)].defender, bottom);
+	const drop = a.team === bottom ? STUFF_DROP : -STUFF_DROP;
 	// A stuffed ball comes off the block and drops just in front of the hitter, on their side of the net.
-	if (stepEntries(g).some((e) => e.tag === 'point' && e.data?.kind === 'stuff')) {
-		return { x: blockHandsX(g, pos, bottom), y: VIEW.netY + (a.team === bottom ? STUFF_DROP : -STUFF_DROP) };
-	}
+	if (outcome(g) === 'stuffed') return { x: blockHandsX(g, bottom), y: VIEW.netY + drop };
 	// A hitting error (two 1s) goes into the net in front of the hitter.
-	const entries = stepEntries(g);
-	if (entries.some((e) => e.tag === 'swing') && entries.some((e) => e.tag === 'point' && e.data?.kind === 'shank')) {
-		const hitterX = zoneCenter(a.team, pos[a.team][a.hitter], bottom).x;
-		return { x: hitterX, y: VIEW.netY + (a.team === bottom ? STUFF_DROP : -STUFF_DROP) };
-	}
+	if (outcome(g) === 'netted') return { x: zoneCenter(a.team, pos[a.team][a.hitter], bottom).x, y: VIEW.netY + drop };
 	if (a.landing) return zoneCenter(other(a.team), a.landing, bottom);
 	// Before the set the ball stays with the passer or digger; after it, it's with the hitter.
 	return zoneCenter(a.team, pos[a.team][a.hitter], bottom);
@@ -208,25 +208,83 @@ export function ballAt(g: Game, pos: Positions, bottom: TeamId = 'A'): Point {
 /** How far from the net a stuffed ball lands. */
 const STUFF_DROP = 22;
 
-const blockHandsX = (g: Game, pos: Positions, bottom: TeamId) => {
-	const defending = other(g.attack!.team);
-	return zoneCenter(defending, pos[defending].blocker, bottom).x;
+/**
+ * How the latest step's ball ended up, when it's not simply held or landed in a zone: stuffed back
+ * by the block, touched off it, hit into the net (two 1s on the hit), or dropped by the setter (two
+ * 1s on the set).
+ */
+export function outcome(g: Game): 'stuffed' | 'touched' | 'netted' | 'dropped' | null {
+	const entries = stepEntries(g);
+	const block = entries.find((e) => e.tag === 'block')?.data?.result;
+	if (block === 'stuff') return 'stuffed';
+	if (block === 'touch') return 'touched';
+	if (entries.find((e) => e.tag === 'point')?.data?.kind !== 'shank') return null;
+	return entries.some((e) => e.tag === 'swing') ? 'netted' : 'dropped';
+}
+
+/**
+ * The block, drawn on the net in front of the blocker in zone 2: blocking line covers the sideline
+ * half of their zone, blocking cross the half toward the middle of the court.
+ */
+export function blockBar(defending: TeamId, block: Channel, bottom: TeamId = 'A') {
+	const box = zoneBox(defending, 2, bottom);
+	const half = box.w / 2;
+	// Zone 2 is on the right of the screen for the bottom team and, mirrored, on the left for the top.
+	const near = defending === bottom;
+	const sidelineHalf = near ? box.x + half : box.x;
+	const middleHalf = near ? box.x : box.x + half;
+	const x = (block === 'line' ? sidelineHalf : middleHalf) + 4;
+	return { x, y: near ? VIEW.netY + 6 : VIEW.netY - 12, w: half - 8, near };
+}
+
+/** The middle of the block the defence called. */
+const blockHandsX = (g: Game, bottom: TeamId) => {
+	const a = g.attack!;
+	const bar = blockBar(other(a.team), a.calls!.block, bottom);
+	return bar.x + bar.w / 2;
 };
 
 /**
- * Where a blocked ball meets the block, if the latest step had a stuff or a touch: the blocker's
- * hands, on the net in front of them. The ball flies there first, then on to where it ends up.
+ * Where the ball meets the net on its way, if the latest step stopped it there: the block's hands
+ * for a stuff or a touch, or the net in front of the hitter for a ball hit into it. The ball flies
+ * there first, then on to where it ends up.
  */
-export function blockHands(g: Game, pos: Positions, bottom: TeamId = 'A'): Point | null {
-	const block = stepEntries(g).find((e) => e.tag === 'block');
-	if (!g.attack || !block || block.data?.result === 'clean') return null;
-	return { x: blockHandsX(g, pos, bottom), y: VIEW.netY };
+export function ballVia(g: Game, pos: Positions, bottom: TeamId = 'A'): Point | null {
+	const how = outcome(g);
+	if (how === 'stuffed' || how === 'touched') return { x: blockHandsX(g, bottom), y: VIEW.netY };
+	if (how === 'netted') return { x: zoneCenter(g.attack!.team, pos[g.attack!.team][g.attack!.hitter], bottom).x, y: VIEW.netY };
+	return null;
 }
 
-/** Where the ball is while a step's dice roll: on a pass or set it goes to that player at their spot. */
+/** A held ball sits at the top corner of the holder's chip. */
+const HELD = { x: 34, y: -20 };
+const held = (p: Point): Point => ({ x: p.x + HELD.x, y: p.y + HELD.y });
+
+/**
+ * Where the ball is drawn when play stops on `g`: held by whoever has it, landed in a zone (on the
+ * sideline for a line shot down it), or loose on the floor after a stuff, an error or a dropped set.
+ */
+export function ballRest(g: Game, pos: Positions, bottom: TeamId = 'A'): Point {
+	const at = ballAt(g, pos, bottom);
+	const how = outcome(g);
+	if (how === 'stuffed' || how === 'netted') return at;
+	const a = g.attack;
+	if (how === 'dropped' && a) {
+		const setter = zoneCenter(a.team, pos[a.team][partner(a.hitter)], bottom);
+		return { x: setter.x + HELD.x, y: setter.y + 26 };
+	}
+	if (a?.calls && a.landing && g.phase.kind !== 'touched') {
+		const zone = zoneCenter(other(a.team), a.landing, bottom);
+		const onLine = shotPoint(other(a.team), a.landing, a.calls.shot, bottom);
+		if (at.x === zone.x && at.y === zone.y && onLine.x !== zone.x) return { x: onLine.x, y: onLine.y + HELD.y };
+	}
+	return held(at);
+}
+
+/** Where the ball is while a step's dice roll: on a pass or set it has gone to that player at their spot. */
 export function rollBall(before: Game, rolls: Roll[], rollPos: Positions, bottom: TeamId = 'A'): Point {
 	const touch = rolls.find((r) => r.label === 'set' || r.label === 'pass');
-	return touch ? zoneCenter(touch.team, rollPos[touch.team][touch.slot], bottom) : ballAt(before, rollPos, bottom);
+	return touch ? held(zoneCenter(touch.team, rollPos[touch.team][touch.slot], bottom)) : ballRest(before, rollPos, bottom);
 }
 
 /** Candidate heights for a callout in the bottom and top halves, net side to baseline (viewBox units). */
@@ -245,24 +303,17 @@ export function calloutTop(team: TeamId, pos: Positions, bottom: TeamId = 'A'): 
 	return (100 * best) / VIEW.height;
 }
 
-export type FlightKind = 'spike' | 'tip' | 'serve' | 'lob' | 'drop';
-
-/** How high (viewBox units) and how long (ms) each kind of ball flies. */
-export const FLIGHT: Record<FlightKind, { apex: number; ms: number }> = {
-	spike: { apex: 10, ms: 280 },
-	tip: { apex: 45, ms: 520 },
-	serve: { apex: 80, ms: 760 },
-	lob: { apex: 55, ms: 560 },
-	/** Off the block: a short fall from the net. */
-	drop: { apex: 18, ms: 380 }
-};
-
-/** The kind of flight the ball is on: an attack from the latest step, a serve, or a pass or set. */
-export function flightKind(g: Game, setting: boolean): FlightKind {
-	if (setting) return 'lob';
+/**
+ * How the latest step sends the ball on its way: a spike or a tip, a serve, or a lob for a pass, a
+ * set, an easy ball over or a ball fetched for the next serve.
+ */
+export function flightKind(g: Game): FlightKind {
 	const entries = stepEntries(g);
 	const hit = entries.find((e) => e.tag === 'hit' || e.tag === 'swing');
-	if (hit) return hit.data?.shot === 'tip' ? 'tip' : 'spike';
+	if (hit) {
+		if (entries.some((e) => e.tag === 'accuracy' && e.data?.result === 'easy')) return 'lob';
+		return hit.data?.shot === 'tip' ? 'tip' : 'spike';
+	}
 	return entries.some((e) => e.tag === 'serve') ? 'serve' : 'lob';
 }
 
@@ -274,4 +325,15 @@ export function arcPoint(from: Point, to: Point, apex: number, t: number) {
 	const ground = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
 	const height = 4 * apex * t * (1 - t);
 	return { x: ground.x, y: ground.y - height, ground, height };
+}
+
+/**
+ * The ball's path from `from` to `to` drawn up to `t` (0–1) of the way: the arc is a quadratic curve
+ * whose control point sits 2 × apex above the midpoint, cut at `t`.
+ */
+export function arcPath(from: Point, to: Point, apex: number, t = 1): string {
+	const control = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 - 2 * apex };
+	const c = { x: from.x + (control.x - from.x) * t, y: from.y + (control.y - from.y) * t };
+	const end = arcPoint(from, to, apex, t);
+	return `M ${from.x} ${from.y} Q ${c.x} ${c.y} ${end.x} ${end.y}`;
 }
