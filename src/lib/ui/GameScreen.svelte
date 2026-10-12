@@ -5,6 +5,7 @@
 	import Controls from './Controls.svelte';
 	import Court from './Court.svelte';
 	import Rules from './Rules.svelte';
+	import Settings from './Settings.svelte';
 	import ScoreLine from './ScoreLine.svelte';
 	import TopBar from './TopBar.svelte';
 	import { choreograph, fullTrails, holdAfter, sample, still, type Frame, type Timeline } from './choreo.ts';
@@ -119,6 +120,7 @@
 		if (next || view.steps === 0 || clearsSheet(view)) sheet = next;
 	});
 	let rules: Rules;
+	let settings: Settings;
 	let scoreLine: ScoreLine;
 	/** Dice on the court. A possession's pass and set dice stay (faded) until the attack, so you can see the build-up. */
 	let dice = $state.raw<{ key: number; items: (PlacedDie & { step: number })[] }>({ key: 0, items: [] });
@@ -309,8 +311,8 @@
 	/** Space or → steps, unless you're typing in a box or a button already has focus. */
 	function onkeydown(e: KeyboardEvent) {
 		if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-		// The phone's score sheet and the rules are modal: no game keys behind them (they close themselves on Escape).
-		if (scoreLine.isOpen()) return;
+		// The phone's score sheet, help and settings are modal: no game keys behind them (they close themselves on Escape).
+		if (scoreLine.isOpen() || settings.isOpen()) return;
 		if (e.key === '?' || (e.key === '/' && e.shiftKey)) return rules.toggle();
 		if (rules.isOpen()) return;
 		if (ondebug && (e.key === 'd' || e.key === 'D')) return ondebug();
@@ -345,7 +347,7 @@
 	style:--extra-h="{bannerH + dockH}px"
 	style:--court-min={bannerH + dockH ? '200px' : undefined}
 >
-	<TopBar game={view} {you} {names} {opponent} {debugOpen} onhelp={() => rules.toggle()} {ondebug} {onleave} />
+	<TopBar game={view} {you} {names} {opponent} {debugOpen} onhelp={() => rules.toggle()} onsettings={() => settings.toggle()} {ondebug} {onleave} />
 	{#if banner}<div bind:clientHeight={bannerH}>{@render banner()}</div>{/if}
 	<Court
 		game={court}
@@ -386,6 +388,7 @@
 	<ScoreLine {sheet} bind:this={scoreLine} />
 </main>
 <Rules bind:this={rules} />
+<Settings bind:this={settings} />
 
 <style>
 	main {
@@ -400,6 +403,12 @@
 		main {
 			--chrome-h: calc(332px + var(--extra-h));
 			--court-min: 200px;
+		}
+	}
+	/* The narrowest phones: a little less margin, so the top bar fits. */
+	@media (max-width: 340px) {
+		main {
+			padding: 0 10px 8px;
 		}
 	}
 	/* The commentary feed is a few lines taller than the one-line status. */

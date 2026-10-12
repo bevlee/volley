@@ -9,6 +9,7 @@
 		opponent = null,
 		debugOpen = false,
 		onhelp,
+		onsettings,
 		ondebug,
 		onleave
 	}: {
@@ -21,9 +22,10 @@
 		opponent?: 'connected' | 'away' | 'waiting' | null;
 		debugOpen?: boolean;
 		onhelp: () => void;
+		onsettings: () => void;
 		/** Shows the debug button (only on /admin); null or missing hides it. */
 		ondebug?: (() => void) | null;
-		/** Online: shows a Leave button next to the rules. */
+		/** Online: shows a Leave button next to Help. */
 		onleave?: () => void;
 	} = $props();
 </script>
@@ -31,7 +33,7 @@
 {#snippet tag(team: TeamId)}
 	{#if names?.[team]}
 		<small class:you={you === team}>
-			{names[team]}{#if you && team !== you && opponent === 'connected'}<span class="here" title="Connected"></span>{:else if you && team !== you && opponent === 'away'}<svg
+			<span class="name">{names[team]}</span>{#if you && team !== you && opponent === 'connected'}<span class="here" title="Connected"></span>{:else if you && team !== you && opponent === 'away'}<svg
 					class="away"
 					viewBox="0 0 10 10"
 					role="img"
@@ -57,8 +59,28 @@
 		<span class="meta"><b>Team {game.winner} wins {game.score[game.winner]}–{game.score[other(game.winner)]}</b></span>
 	{/if}
 	<div class="icons">
-		{#if onleave}<button class="leave" onclick={onleave}>Leave</button>{/if}
-		<button class="icon" onclick={onhelp} aria-label="Rules" title="Rules (?)">?</button>
+		{#if onleave}
+			<button class="leave" onclick={onleave} aria-label="Leave" title="Leave the game">
+				<span class="word">Leave</span>
+				<!-- Narrow phones: a door with an arrow out, so Help and Settings still fit. -->
+				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+					<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 8l-4 4l4 4M5 12h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+				</svg>
+			</button>
+		{/if}
+		<button class="pill" onclick={onhelp} title="How to play (?)">Help</button>
+		<button class="icon" onclick={onsettings} aria-label="Settings" title="Settings">
+			<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+				<path
+					d="M12 15.5a3.5 3.5 0 1 0 0-7a3.5 3.5 0 0 0 0 7Z M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3a1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8a1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5a1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.6"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				/>
+			</svg>
+		</button>
 		{#if ondebug}
 			<button class="icon" class:on={debugOpen} onclick={ondebug} aria-label="Debug panel" aria-pressed={debugOpen} title="Debug panel (D)">
 				<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
@@ -93,15 +115,24 @@
 	}
 	/* "you" under your team's letter, online. */
 	.score small {
-		display: block;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		max-width: 6rem;
-		overflow: hidden;
-		text-overflow: ellipsis;
 		white-space: nowrap;
 		font-size: 0.65rem;
 		font-weight: 500;
 		line-height: 1.1;
 		text-align: center;
+	}
+	/* A long name is cut short, but never the connection mark after it. */
+	.name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.here,
+	.away {
+		flex: none;
 	}
 	.score small.you {
 		font-weight: 800;
@@ -204,21 +235,74 @@
 		.meta {
 			text-align: left;
 		}
-		.icon {
-			width: 40px;
-			height: 40px;
+		.icons {
+			gap: 4px;
 		}
-		.leave {
-			height: 40px;
-			border-radius: 20px;
+		.icon {
+			width: 38px;
+			height: 38px;
+		}
+		.leave,
+		.pill {
+			height: 38px;
+			border-radius: 19px;
+			padding: 0 10px;
 		}
 	}
-	.leave {
+	.leave,
+	.pill {
 		height: 32px;
 		border-radius: 16px;
 		font-size: 0.85rem;
 		font-weight: 600;
 		color: var(--muted);
+	}
+	.leave svg {
+		display: none;
+	}
+	/* The narrowest phones: Leave becomes an icon, and the score sits a little tighter. */
+	@media (max-width: 400px) {
+		.leave {
+			width: 38px;
+			padding: 0;
+			display: grid;
+			place-items: center;
+		}
+		.leave .word {
+			display: none;
+		}
+		.leave svg {
+			display: block;
+		}
+		.bar {
+			column-gap: 4px;
+		}
+		.score {
+			gap: 4px;
+		}
+		.num {
+			font-size: 1.4rem;
+		}
+		.score small {
+			max-width: 3.6rem;
+		}
+		.pill {
+			padding: 0 8px;
+		}
+	}
+	@media (max-width: 340px) {
+		.icon,
+		.leave {
+			width: 34px;
+			height: 34px;
+		}
+		.pill {
+			height: 34px;
+			padding: 0 6px;
+		}
+		.icons {
+			gap: 2px;
+		}
 	}
 	.icon.on {
 		background: var(--text);
