@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { reducedMotion } from './pace.svelte';
 	import { onMount } from 'svelte';
 	import { newGame } from '#lib/engine/rally.ts';
 	import type { Slot, TeamId, Zone } from '#lib/engine/types.ts';
@@ -42,7 +43,7 @@
 	let ground = $state({ ...start });
 
 	onMount(() => {
-		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		if (reducedMotion()) return;
 		let stopped = false;
 		let frame = 0;
 		let key = 0;

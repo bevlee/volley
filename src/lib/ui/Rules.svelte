@@ -1,11 +1,16 @@
 <script lang="ts">
 	import { config } from '#lib/engine/config.ts';
-	import { pace, setPace, type Pace } from './pace.svelte.ts';
+	import { motion, pace, setMotion, setPace, type Motion, type Pace } from './pace.svelte.ts';
 
 	const SPEEDS: { value: Pace; label: string }[] = [
 		{ value: 'quick', label: 'Quick' },
 		{ value: 'normal', label: 'Normal' },
 		{ value: 'slow', label: 'Slow' }
+	];
+	const MOTIONS: { value: Motion; label: string }[] = [
+		{ value: 'device', label: 'Device' },
+		{ value: 'on', label: 'On' },
+		{ value: 'reduced', label: 'Reduced' }
 	];
 
 	let dialog: HTMLDialogElement;
@@ -33,7 +38,18 @@
 				</button>
 			{/each}
 		</div>
-		<p class="speed-note">How fast the court plays out on this screen. Online, your opponent keeps their own speed, and your clock starts once your screen has caught up.</p>
+		<div class="speed" role="radiogroup" aria-label="Motion">
+			<span class="speed-label">Motion</span>
+			{#each MOTIONS as m (m.value)}
+				<button role="radio" aria-checked={motion.value === m.value} class:on={motion.value === m.value} onclick={() => setMotion(m.value)}>
+					{m.label}
+				</button>
+			{/each}
+		</div>
+		<p class="speed-note">
+			How fast the court plays out on this screen. Online, your opponent keeps their own speed, and your clock starts once
+			your screen has caught up. Motion follows your device's reduce-motion setting unless you pick On or Reduced.
+		</p>
 		<p>
 			2v2 beach volleyball to {config.targetScore}, win by {config.winBy}. Every touch is a dice roll, and a
 			good pass or set makes the next touch better. Your team is at the bottom of the court: against the
@@ -143,13 +159,18 @@
 	}
 	.speed {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 6px;
 		margin-top: 12px;
 	}
+	.speed + .speed {
+		margin-top: 8px;
+	}
 	.speed-label {
 		color: var(--muted);
 		margin-right: 4px;
+		min-width: 3.6em;
 	}
 	.speed button {
 		font: inherit;

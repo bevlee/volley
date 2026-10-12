@@ -11,7 +11,7 @@
 	import { placeDice, positions, previewDefence, type PlacedDie, type Positions } from './layout.ts';
 	import { clearsSheet, scoreSheet, type ScoreSheet } from './scores.ts';
 	import { commentary, needsDefence, needsShot, nextAction, prompt, quietLine, statusLine, stepEntries } from './story.ts';
-	import { pace, paced, PACES } from './pace.svelte.ts';
+	import { pace, paced, PACES, reducedMotion } from './pace.svelte.ts';
 
 	/**
 	 * The court and everything around it, for one game. It doesn't step the engine: whoever runs the
@@ -185,7 +185,7 @@
 			dice = { key: dice.key, items: [] };
 		}
 		playing = { tl, next, t: 0, last: performance.now(), rolled: false, onDone };
-		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return finish();
+		if (reducedMotion()) return finish();
 		advance(0);
 		frameId = requestAnimationFrame(tick);
 	}

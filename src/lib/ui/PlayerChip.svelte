@@ -158,9 +158,7 @@
 				scale(1.04, 0.88);
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.body {
-			animation: none;
-		}
+	:global([data-motion='reduced']) .body {
+		animation: none;
 	}
 </style>

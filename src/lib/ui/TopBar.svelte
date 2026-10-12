@@ -164,10 +164,8 @@
 			transform: scale(1.8);
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.pop {
-			animation: none;
-		}
+	:global([data-motion='reduced']) .pop {
+		animation: none;
 	}
 	.meta {
 		grid-area: meta;

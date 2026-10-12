@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { paced } from './pace.svelte';
+	import { paced, reducedMotion } from './pace.svelte';
 	import { ROLL_MS } from './timing';
 	let { value, label, x, y }: { value: number; label: string; x: number; y: number } = $props();
 
@@ -44,7 +44,7 @@
 
 	$effect(() => {
 		const final = value;
-		if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+		if (reducedMotion()) {
 			shown = final;
 			rolling = false;
 			return;

@@ -21,7 +21,7 @@
 		zoneCenter,
 		type PlacedDie
 	} from './layout';
-	import { paced } from './pace.svelte';
+	import { paced, reducedMotion } from './pace.svelte';
 	import PlayerChip from './PlayerChip.svelte';
 	import { callout, stepEntries, type Impact } from './story';
 
@@ -114,7 +114,7 @@
 	let impact = $state<Impact | null>(null);
 	$effect(() => {
 		const next = moment?.impact;
-		if (!next || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		if (!next || reducedMotion()) return;
 		impact = next;
 		const stop = setTimeout(() => (impact = null), paced(IMPACT_MS[next]));
 		return () => clearTimeout(stop);
@@ -456,15 +456,13 @@
 			opacity: 0.06;
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.point-trace {
-			animation: none;
-			stroke-dashoffset: 0;
-		}
-		.point-tint {
-			animation: none;
-			opacity: 0.06;
-		}
+	:global([data-motion='reduced']) .point-trace {
+		animation: none;
+		stroke-dashoffset: 0;
+	}
+	:global([data-motion='reduced']) .point-tint {
+		animation: none;
+		opacity: 0.06;
 	}
 	.impact {
 		fill: none;
@@ -499,12 +497,10 @@
 			opacity: 0;
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.impact,
-		.ripple {
-			animation: none;
-			opacity: 0;
-		}
+	:global([data-motion='reduced']) .impact,
+	:global([data-motion='reduced']) .ripple {
+		animation: none;
+		opacity: 0;
 	}
 	svg {
 		width: 100%;

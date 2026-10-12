@@ -95,10 +95,8 @@
 			transform: translate(-50%, -50%) scale(1) rotate(-3deg);
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.callout {
-			animation: none;
-			transform: translate(-50%, -50%) rotate(-3deg);
-		}
+	:global([data-motion='reduced']) .callout {
+		animation: none;
+		transform: translate(-50%, -50%) rotate(-3deg);
 	}
 </style>
