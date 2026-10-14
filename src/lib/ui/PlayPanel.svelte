@@ -148,9 +148,7 @@
 			width: 50%;
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.fill {
-			animation: none;
-		}
+	:global([data-motion='reduced']) .fill {
+		animation: none;
 	}
 </style>

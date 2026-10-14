@@ -82,10 +82,8 @@
 	.drawer.open {
 		transform: none;
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.drawer {
-			transition: none;
-		}
+	:global([data-motion='reduced']) .drawer {
+		transition: none;
 	}
 	.head {
 		display: flex;

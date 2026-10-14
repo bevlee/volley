@@ -1,10 +1,12 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { cubicOut } from 'svelte/easing';
 	import { Tween } from 'svelte/motion';
 	import { config } from '#lib/engine/config.ts';
 	import type { Player, TeamId } from '#lib/engine/types.ts';
 	import type { Role } from './layout';
 	import { paced } from './pace.svelte';
+	import { MOVE_MS } from './timing';
 	import type { Action } from './story';
 
 	let {
@@ -14,6 +16,7 @@
 		role,
 		x,
 		y,
+		glide = true,
 		hitter = false,
 		action = null,
 		actionKey = 0,
@@ -27,6 +30,8 @@
 		role: Role;
 		x: number;
 		y: number;
+		/** Ease to a new spot; off while a step plays, as the court moves everyone itself (see choreo.ts). */
+		glide?: boolean;
 		hitter?: boolean;
 		/** What this player just did; plays a short animation. */
 		action?: Action | null;
@@ -41,7 +46,9 @@
 	const W = 80;
 	/** Three short lines (name, role, stats): a character's name and role don't fit on one line. */
 	const H = 46;
-	const pos = Tween.of(() => ({ x, y }), { duration: () => paced(350), easing: cubicOut });
+	const pos = new Tween(untrack(() => ({ x, y })), { easing: cubicOut });
+	// A number, not a function: Tween only jumps straight there for a duration of exactly 0.
+	$effect.pre(() => void pos.set({ x, y }, { duration: glide ? paced(MOVE_MS) : 0 }));
 	// The top team faces down the screen, so their dives lunge the other way.
 	const facing = $derived(near ? -1 : 1);
 	/**
@@ -187,10 +194,8 @@
 				scale(1.04, 0.88);
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.body,
-		.pips circle.full {
-			animation: none;
-		}
+	:global([data-motion='reduced']) .body,
+	:global([data-motion='reduced']) .pips circle.full {
+		animation: none;
 	}
 </style>

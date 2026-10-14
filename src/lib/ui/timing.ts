@@ -1,13 +1,13 @@
 import type { Game } from '../engine/types';
 
 /**
- * How long the court takes to play out each step. The page animates with these, and the online
- * server uses them to start a player's clock once the moves it sent have played out on screen.
+ * How long the court takes to play out each step, at normal pace. choreo.ts lays a step out with
+ * these, and the online server uses its total to bound how long a screen takes to catch up.
  */
 
 /** How long a die tumbles before it shows its value. */
 export const ROLL_MS = 600;
-/** Time for a player to run to where they roll (matches the chip tween). */
+/** Time for a player to run to a new spot. */
 export const MOVE_MS = 400;
 /** Pause after the dice land before the step's result is shown. */
 export const RESOLVE_MS = ROLL_MS + 150;
@@ -24,15 +24,16 @@ export const pauseAfter = (g: Game) =>
 			? AFTER_ATTACK_MS
 			: BETWEEN_MS;
 
-/**
- * The longest a chain of steps takes to play on the court: each step's move and roll, and the
- * pauses between them. It counts a move before every roll, so it's never short.
- */
-export function playbackMs(chain: Game[]): number {
-	let ms = 0;
-	chain.forEach((g, i) => {
-		if (g.rolls.length) ms += MOVE_MS + RESOLVE_MS;
-		if (i < chain.length - 1) ms += pauseAfter(g);
-	});
-	return ms;
-}
+export type FlightKind = 'spike' | 'tip' | 'serve' | 'lob' | 'drop' | 'deflect';
+
+/** How high (viewBox units) and how long (ms) each kind of ball flies. */
+export const FLIGHT: Record<FlightKind, { apex: number; ms: number }> = {
+	spike: { apex: 10, ms: 280 },
+	tip: { apex: 45, ms: 520 },
+	serve: { apex: 80, ms: 760 },
+	lob: { apex: 55, ms: 560 },
+	/** Off the block, stuffed: a short fall from the net. */
+	drop: { apex: 18, ms: 380 },
+	/** Off the block, touched: up and back to the defender running in to set it. */
+	deflect: { apex: 40, ms: 520 }
+};

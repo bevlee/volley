@@ -8,13 +8,14 @@
 	import Controls from './Controls.svelte';
 	import Court from './Court.svelte';
 	import Rules from './Rules.svelte';
+	import Settings from './Settings.svelte';
 	import ScoreLine from './ScoreLine.svelte';
 	import TopBar from './TopBar.svelte';
-	import { ballAt, placeDice, positions, rollBall, rollPositions, type PlacedDie, type Point, type Positions } from './layout.ts';
+	import { choreograph, fullTrails, holdAfter, sample, still, type Frame, type Timeline } from './choreo.ts';
+	import { placeDice, positions, previewDefence, type PlacedDie, type Positions } from './layout.ts';
 	import { clearsSheet, scoreSheet, type ScoreSheet } from './scores.ts';
 	import { commentary, needsDefence, needsShot, nextAction, prompt, quietLine, statusLine, stepEntries } from './story.ts';
-	import { paced } from './pace.svelte.ts';
-	import { MOVE_MS, RESOLVE_MS, pauseAfter } from './timing.ts';
+	import { pace, paced, PACES, reducedMotion } from './pace.svelte.ts';
 
 	/**
 	 * The court and everything around it, for one game. It doesn't step the engine: whoever runs the
@@ -104,10 +105,11 @@
 	/** The latest state: what play has reached. `initial` only sets where it starts. */
 	const start = untrack(() => initial);
 	let game = $state.raw(start);
+	/** What the court draws (the calls, the arrows, who's attacking): it switches when a step's dice have settled. */
+	let court = $state.raw(start);
+	/** What's been told (the score, the commentary, the controls): a result switches it when the ball lands. */
 	shown = start;
 	const view = $derived(shown ?? start);
-	/** Overrides where the court draws players and the ball while someone runs to their spot to roll. */
-	let staged = $state.raw<{ pos: Positions; ball: Point } | null>(null);
 	/** The shot the player is hovering, previewed on the court. */
 	let preview = $state<Shot | null>(null);
 	/** The shot the player has picked for their attack; Space hits it. Kept between attacks as their default. */
@@ -172,17 +174,25 @@
 		if (next || view.steps === 0 || clearsSheet(view)) sheet = next;
 	});
 	let rules: Rules;
+	let settings: Settings;
 	let scoreLine: ScoreLine;
 	/** Dice on the court. A possession's pass and set dice stay (faded) until the attack, so you can see the build-up. */
 	let dice = $state.raw<{ key: number; items: (PlacedDie & { step: number })[] }>({ key: 0, items: [] });
-	let timers: ReturnType<typeof setTimeout>[] = [];
+	/** The possession's earlier flights, kept on the court as its build-up. */
+	let trails = $state.raw<string[]>([]);
+	/** The step playing out (see choreo.ts), and how far into it, in ms at normal pace. */
+	let playing: { tl: Timeline; next: Game; t: number; last: number; rolled: boolean; onDone?: (tl: Timeline) => void } | null = null;
+	/** The court at this moment while a step plays; null when it's at rest. */
+	let live = $state.raw<Frame | null>(null);
+	let frameId = 0;
+	let hold: ReturnType<typeof setTimeout> | undefined;
 	/** Steps still to play on their own after the one on screen. */
 	let pending = $state.raw<Game[]>([]);
 	/**
 	 * Play is running on its own (a step animating, or the serve, pass or set still to come): the
 	 * main button waits, showing where play is heading, until it's the player's turn again.
 	 */
-	const busy = $derived(view !== game || pending.length > 0);
+	const busy = $derived(live !== null || pending.length > 0);
 	const heading = $derived(pending.at(-1) ?? game);
 	$effect(() => {
 		idle = !busy;
@@ -190,70 +200,103 @@
 		const latest = game;
 		if (!busy) untrack(() => onsettled?.(latest));
 	});
-	$effect(() => () => timers.forEach(clearTimeout));
+	$effect(() => () => {
+		cancelAnimationFrame(frameId);
+		clearTimeout(hold);
+	});
+	// Nobody watches a hidden tab: catch up at once rather than playing on when they come back.
+	$effect(() => {
+		const hidden = () => document.hidden && busy && skip();
+		document.addEventListener('visibilitychange', hidden);
+		return () => document.removeEventListener('visibilitychange', hidden);
+	});
+
+	/** Where the players stand at rest: the defending pair on the spots the player is choosing. */
+	const restPositions = $derived(defending ? previewDefence(court, defence.block, defence.stance) : positions(court));
+	const frame = $derived(live ?? still(court, restPositions, bottom));
 
 	/** The banner's and dock's heights, measured, so the court shrinks to keep the controls on screen. */
 	let bannerH = $state(0);
 	let dockH = $state(0);
 
-	const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-
 	/**
-	 * Show a new state in beats, in volleyball order:
-	 * 1. move: anyone who must get to a spot before rolling runs there (a setter to the setting spot);
-	 * 2. roll: the step's dice tumble where the rollers stand;
-	 * 3. resolve: once the dice settle, players move on, the ball moves and the log updates.
-	 * Jumps (a snapshot, the debug panel's Play rally) go straight to the end.
+	 * Plays the step to `next` on the court, laid out by `choreograph`: runners, then the dice, then
+	 * the new state with the ball's flight, and the result told when it lands. Jumps (a snapshot, a
+	 * skip, the debug panel's Play rally) go straight to the end.
 	 */
-	function show(next: Game, animate: boolean, onDone?: () => void) {
-		timers.forEach(clearTimeout);
-		timers = [];
-		shown = game; // finish any step still playing out
-		staged = null;
+	function show(next: Game, animate: boolean, onDone?: (tl: Timeline) => void) {
+		finish();
+		clearTimeout(hold);
+		const prev = game;
 		game = next;
-		const from = shown!;
-		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-		// A new rally or an attack clears the court's dice; a pass or set adds to them.
-		const fresh =
-			!animate || next.steps < dice.key || stepEntries(next).some((e) => ['rallyStart', 'serve', 'hit', 'swing'].includes(e.tag ?? ''));
-		const place = (at: Positions) => [
-			...(fresh ? [] : dice.items),
-			...placeDice(next.rolls, at, bottom).map((d) => ({ ...d, step: next.steps }))
-		];
-		const finish = () => {
-			staged = null;
-			shown = next;
-			onDone?.();
-		};
-		if (!animate || !next.rolls.length || reduced) {
-			dice = { key: next.steps, items: place(animate ? rollPositions(from, next.rolls) : positions(next)) };
-			return finish();
+		if (!animate) {
+			trails = [];
+			dice = { key: next.steps, items: place(next, positions(next), true) };
+			court = shown = next;
+			return;
 		}
-		const rollAt = rollPositions(from, next.rolls);
-		const ballDuringRoll = rollBall(from, next.rolls, rollAt, bottom);
-		const mustMove = !same(rollAt, positions(from)) || !same(ballDuringRoll, ballAt(from, positions(from), bottom));
-		const roll = () => {
-			dice = { key: next.steps, items: place(rollAt) };
-			timers.push(setTimeout(finish, paced(RESOLVE_MS)));
-		};
-		if (mustMove) {
-			staged = { pos: rollAt, ball: ballDuringRoll };
-			dice = { key: next.steps, items: fresh ? [] : dice.items };
-			timers.push(setTimeout(roll, paced(MOVE_MS)));
-		} else roll();
+		const tl = choreograph(prev, next, { bottom, start: restPositions });
+		if (tl.fresh) {
+			trails = [];
+			dice = { key: dice.key, items: [] };
+		}
+		playing = { tl, next, t: 0, last: performance.now(), rolled: false, onDone };
+		if (reducedMotion()) return finish();
+		advance(0);
+		frameId = requestAnimationFrame(tick);
 	}
 
-	/** After a step has played out: pause, then play the next one still to come. */
-	function playNext() {
+	/** This step's dice, added to the possession's (or on their own, for a step that starts a new picture). */
+	const place = (next: Game, at: Positions, fresh: boolean) => [
+		...(fresh ? [] : dice.items),
+		...placeDice(next.rolls, at, bottom).map((d) => ({ ...d, step: next.steps }))
+	];
+
+	function tick(now: number) {
+		const p = playing;
+		if (!p) return;
+		const ms = Math.max(0, now - p.last) / PACES[pace.value];
+		p.last = now;
+		advance(ms);
+		if (playing) frameId = requestAnimationFrame(tick);
+	}
+
+	/** Moves the playing step on by `ms`: the dice, the reveal and the landing happen as their times pass. */
+	function advance(ms: number) {
+		const p = playing!;
+		p.t = Math.min(p.tl.duration, p.t + ms);
+		const { tl, next, t } = p;
+		if (tl.roll && t >= tl.roll.at && !p.rolled) {
+			p.rolled = true;
+			dice = { key: next.steps, items: place(next, tl.roll.pos, false) };
+		}
+		if (t >= tl.revealAt && court !== next) court = next;
+		if (t >= tl.tellAt && shown !== next) shown = next;
+		if (t < tl.duration) {
+			live = sample(tl, t);
+			return;
+		}
+		trails = [...trails, ...fullTrails(tl)];
+		live = null;
+		playing = null;
+		p.onDone?.(tl);
+	}
+
+	/** Plays whatever step is playing to its end at once. */
+	function finish() {
+		cancelAnimationFrame(frameId);
+		if (playing) advance(Infinity);
+	}
+
+	/** After a step `tl` has played out: pause, then play the next one still to come. */
+	function playNext(tl: Timeline) {
 		// A step leaves the queue only when it starts, so play counts as busy through the pause before it.
 		const [following, ...rest] = pending;
 		if (!following) return;
-		timers.push(
-			setTimeout(() => {
-				pending = rest;
-				show(following, true, playNext);
-			}, paced(pauseAfter(game)))
-		);
+		hold = setTimeout(() => {
+			pending = rest;
+			show(following, true, playNext);
+		}, paced(holdAfter(tl, game)));
 	}
 
 	/**
@@ -339,8 +382,8 @@
 	/** Space or → steps, unless you're typing in a box or a button already has focus. */
 	function onkeydown(e: KeyboardEvent) {
 		if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-		// The phone's score sheet and the rules are modal: no game keys behind them (they close themselves on Escape).
-		if (scoreLine.isOpen()) return;
+		// The phone's score sheet, help and settings are modal: no game keys behind them (they close themselves on Escape).
+		if (scoreLine.isOpen() || settings.isOpen()) return;
 		if (e.key === '?' || (e.key === '/' && e.shiftKey)) return rules.toggle();
 		if (rules.isOpen()) return;
 		if (ondebug && (e.key === 'd' || e.key === 'D')) return ondebug();
@@ -392,12 +435,15 @@
 	style:--extra-h="{bannerH + dockH}px"
 	style:--court-min={bannerH + dockH ? '200px' : undefined}
 >
-	<TopBar game={view} {you} {names} {opponent} {debugOpen} onhelp={() => rules.toggle()} {ondebug} {onleave} />
+	<TopBar game={view} {you} {names} {opponent} {debugOpen} onhelp={() => rules.toggle()} onsettings={() => settings.toggle()} {ondebug} {onleave} />
 	{#if banner}<div bind:clientHeight={bannerH}>{@render banner()}</div>{/if}
 	<Court
-		game={view}
+		game={court}
+		{frame}
+		{trails}
+		landed={court === view}
+		glide={!live}
 		{dice}
-		{staged}
 		{bottom}
 		preview={choosing ? (preview ?? shotPick.shot) : null}
 		defencePreview={defending ? defence : null}
@@ -435,6 +481,7 @@
 	<ScoreLine {sheet} bind:this={scoreLine} />
 </main>
 <Rules bind:this={rules} />
+<Settings bind:this={settings} />
 
 <style>
 	main {
@@ -449,6 +496,12 @@
 		main {
 			--chrome-h: calc(332px + var(--extra-h));
 			--court-min: 200px;
+		}
+	}
+	/* The narrowest phones: a little less margin, so the top bar fits. */
+	@media (max-width: 340px) {
+		main {
+			padding: 0 10px 8px;
 		}
 	}
 	/* The commentary feed is a few lines taller than the one-line status. */

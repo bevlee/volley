@@ -286,10 +286,8 @@
 			opacity: 0;
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		dialog[open] .sheet {
-			animation: none;
-		}
+	:global([data-motion='reduced']) dialog[open] .sheet {
+		animation: none;
 	}
 	.bar {
 		display: flex;

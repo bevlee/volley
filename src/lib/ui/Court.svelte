@@ -1,21 +1,17 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { Tween } from 'svelte/motion';
 	import { other } from '#lib/engine/rally.ts';
 	import { TARGET, ZONES } from '#lib/engine/rules.ts';
 	import type { Channel, Game, Shot, Stance, TeamId } from '#lib/engine/types.ts';
 	import CalloutView from './Callout.svelte';
+	import type { Frame } from './choreo';
 	import Die from './Die.svelte';
 	import {
-		arcPoint,
-		ballAt,
-		blockHands,
+		ballRest,
+		blockBar,
 		calloutTop,
 		coverage,
-		FLIGHT,
-		flightKind,
 		halfBox,
-		type FlightKind,
+		outcome,
 		positions,
 		previewDefence,
 		roleOf,
@@ -23,19 +19,23 @@
 		VIEW,
 		zoneBox,
 		zoneCenter,
-		type PlacedDie,
-		type Point,
-		type Positions
+		type PlacedDie
 	} from './layout';
-	import { paced } from './pace.svelte';
+	import { paced, reducedMotion } from './pace.svelte';
 	import PlayerChip from './PlayerChip.svelte';
-	import { callout, playerActions, stepEntries, type Impact } from './story';
+	import { callout, stepEntries, type Impact } from './story';
 
-	/** `dice.key` changes every step, so a new roll re-animates even if the values repeat. */
+	/**
+	 * Draws the court. Where the players and the ball are comes from `frame` (a moment of the step
+	 * playing out, see choreo.ts); everything else (the calls, the arrows, the block) from `game`.
+	 */
 	let {
 		game,
+		frame,
+		trails = [],
+		landed = true,
+		glide = true,
 		dice,
-		staged = null,
 		preview = null,
 		defencePreview = null,
 		onshot = null,
@@ -43,10 +43,15 @@
 		bottom = 'A'
 	}: {
 		game: Game;
-		/** Each die carries the step it was rolled in: earlier ones in the possession stay, faded. */
+		frame: Frame;
+		/** The possession's earlier flights, drawn under this step's. */
+		trails?: string[];
+		/** The step's ball has come to rest, so its result shows: the point, the callout, the court's reaction. */
+		landed?: boolean;
+		/** Nothing is playing: players glide to new spots themselves (a defence being set up). */
+		glide?: boolean;
+		/** Each die carries the step it was rolled in: earlier ones in the possession stay, faded. `key` changes every step. */
 		dice: { key: number; items: (PlacedDie & { step: number })[] };
-		/** Where to draw players and the ball instead, while someone runs to their spot to roll. */
-		staged?: { pos: Positions; ball: Point } | null;
 		/** A shot the player is hovering before choosing it: drawn as the intended arrow. */
 		preview?: Shot | null;
 		/** A defence the player is setting up before locking it in: drawn on the court. */
@@ -66,17 +71,14 @@
 	const COVER_WORD = { blocked: 'blocked', read: 'covered', open: 'open' } as const;
 
 	const TEAMS: TeamId[] = ['A', 'B'];
+	/** Where the players stand for this state, for what's drawn around them (arrows, callouts). */
 	const pos = $derived(
-		staged?.pos ??
-			(defencePreview && !game.attack?.calls
-				? previewDefence(game, defencePreview.block, defencePreview.stance)
-				: positions(game))
+		defencePreview && !game.attack?.calls ? previewDefence(game, defencePreview.block, defencePreview.stance) : positions(game)
 	);
 	const a = $derived(game.attack);
 	const defending = $derived(a ? other(a.team) : null);
 	const calledShot = $derived(a?.calls?.shot ?? preview);
 	const target = $derived(calledShot && a ? TARGET[calledShot] : null);
-	const ballTarget = $derived(staged?.ball ?? ballAt(game, pos, bottom));
 	/** The shots the attacking side might play: in run mode, a dig over to deep middle too. */
 	const shots = $derived(a && (game.teams[a.team].runKit || game.teams[a.team].playbook) ? [...SHOTS, 'over' as const] : SHOTS);
 	/** What the defence covers, once it's called or while the player sets theirs up. */
@@ -90,89 +92,25 @@
 		return { x: b.x + b.w / 2, y: b.y + 14 };
 	};
 
-	const stuffed = $derived(stepEntries(game).some((e) => e.tag === 'point' && e.data?.kind === 'stuff'));
-	/** Hit into the net (two 1s): like a stuffed ball, it drops at the net rather than being held. */
-	const netted = $derived(
-		stepEntries(game).some((e) => e.tag === 'swing') && stepEntries(game).some((e) => e.tag === 'point' && e.data?.kind === 'shank')
-	);
 	/** A stuffed or touched ball never reaches the back court, so don't draw it landing there. */
-	const stopped = $derived(game.phase.kind === 'touched' || stuffed);
-
-	// The ball flies along an arc to each new spot, sitting at the corner of the chip that holds it.
-	// A line shot that lands in the sideline column sits on the line instead.
-	const BALL_OFFSET = { x: 34, y: -20 };
-	const ballSpot = $derived.by(() => {
-		// A stuffed or netted ball is loose on the floor, not held by anyone.
-		if ((stuffed || netted) && !staged) return ballTarget;
-		const landed = a?.calls && a.landing && !stopped && !staged ? zoneCenter(other(a.team), a.landing, bottom) : null;
-		const onLine = landed && a?.calls ? shotPoint(other(a.team), a.landing!, a.calls.shot, bottom) : null;
-		if (landed && onLine && onLine.x !== landed.x && ballTarget.x === landed.x && ballTarget.y === landed.y) {
-			return { x: onLine.x, y: onLine.y + BALL_OFFSET.y };
-		}
-		return { x: ballTarget.x + BALL_OFFSET.x, y: ballTarget.y + BALL_OFFSET.y };
-	});
-	/** A blocked ball goes into the blocker's hands at the net before it ends up where it lands. */
-	const via = $derived(staged ? null : blockHands(game, pos, bottom));
-	let flight = $state.raw(untrack(() => ({ from: ballSpot, to: ballSpot, apex: 0 })));
-	/** Where the ball is headed; with a block, the flight's first leg ends short of it. */
-	let heading = untrack(() => ballSpot);
-	/** Bumped for every new flight, so a block's second leg doesn't start after a newer flight. */
-	let flights = 0;
-	/** The possession's earlier flights (serve, pass, set), kept as dotted lines for reference. */
-	let earlier = $state.raw<string[]>([]);
-	let lastKind: FlightKind = 'lob';
-	const progress = new Tween(1);
-	$effect(() => {
-		const to = ballSpot;
-		const stop = via;
-		const kind = flightKind(game, staged !== null);
-		untrack(() => {
-			if (to.x === heading.x && to.y === heading.y) return;
-			heading = to;
-			// A serve or an attack starts a new picture; a pass or set adds to the build-up.
-			const attack = (k: FlightKind) => k === 'spike' || k === 'tip';
-			const before = pathOf(flight);
-			earlier = kind === 'serve' || attack(kind) || attack(lastKind) || !before ? [] : [...earlier, before];
-			lastKind = kind;
-			// Start from wherever the ball's shadow is now, even if it was still in the air.
-			const from = arcPoint(flight.from, flight.to, flight.apex, progress.current).ground;
-			const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-			const fly = (start: Point, end: Point, k: FlightKind) => {
-				flight = { from: start, to: end, apex: FLIGHT[k].apex };
-				progress.set(0, { duration: 0 });
-				return progress.set(1, { duration: reduced ? 0 : paced(FLIGHT[k].ms) });
-			};
-			const id = ++flights;
-			if (!stop) return void fly(from, to, kind);
-			// Into the block, then off it: the first leg stays on the court as a trail.
-			fly(from, stop, kind).then(() => {
-				if (id !== flights) return;
-				const into = pathOf(flight);
-				if (into) earlier = [...earlier, into];
-				fly(stop, to, 'drop');
-			});
-		});
-	});
-	const ball = $derived(arcPoint(flight.from, flight.to, flight.apex, progress.current));
-	/** A flight's path, drawn as a faint trail: a quadratic curve that peaks at the apex. */
-	function pathOf({ from, to, apex }: { from: Point; to: Point; apex: number }) {
-		if (from.x === to.x && from.y === to.y) return null;
-		const cx = (from.x + to.x) / 2;
-		const cy = (from.y + to.y) / 2 - 2 * apex;
-		return `M ${from.x} ${from.y} Q ${cx} ${cy} ${to.x} ${to.y}`;
-	}
-	const trail = $derived(pathOf(flight));
-	const moment = $derived(callout(game));
-	const actions = $derived(playerActions(game));
+	const stopped = $derived(game.phase.kind === 'touched' || outcome(game) === 'stuffed');
+	/** Where the step's ball ends up. */
+	const rest = $derived(ballRest(game, positions(game), bottom));
+	const moment = $derived(landed ? callout(game) : null);
 	/** A point was won this step: mark where the ball hit the floor. */
-	const scored = $derived(stepEntries(game).some((e) => e.tag === 'point'));
+	const scored = $derived(landed && stepEntries(game).some((e) => e.tag === 'point'));
 	/**
 	 * The ball came down on the losing side (a kill on the defenders, a block or error on the hitters),
 	 * so that half gets a glowing orange trace, drawn clockwise.
 	 */
-	const pointTo = $derived(stepEntries(game).find((e) => e.tag === 'point')?.data?.winner as TeamId | undefined);
+	const pointTo = $derived(landed ? (stepEntries(game).find((e) => e.tag === 'point')?.data?.winner as TeamId | undefined) : undefined);
 	/** Once the step's result is on screen, the dice fade so the play stands out. */
 	const resolved = $derived(dice.key === game.steps);
+	/**
+	 * The possession's flights, earliest first. Keyed by place and starting point, so a flight keeps
+	 * its element (and its fade) as it's drawn out, and a new possession's flights get new ones.
+	 */
+	const flights = $derived([...trails, ...frame.trails].map((d, i) => ({ d, key: `${i}:${d.slice(0, d.indexOf(' Q'))}` })));
 
 	// Big moments make the court react: a shake or a harder smash for a kill, a slam back toward the
 	// hitter for a stuff block, and a hanging zoom with ripples for a tip kill.
@@ -180,7 +118,7 @@
 	let impact = $state<Impact | null>(null);
 	$effect(() => {
 		const next = moment?.impact;
-		if (!next || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		if (!next || reducedMotion()) return;
 		impact = next;
 		const stop = setTimeout(() => (impact = null), paced(IMPACT_MS[next]));
 		return () => clearTimeout(stop);
@@ -198,23 +136,13 @@
 		return {
 			from: calledShot === 'line' ? { x: intended.x, y: hitter.y } : hitter,
 			intended,
-			actual: a.landing && !stopped ? shotPoint(d, a.landing, calledShot, bottom) : null
+			actual: landed && a.landing && !stopped ? shotPoint(d, a.landing, calledShot, bottom) : null
 		};
 	});
 
-	// The blocker stands in zone 2, facing the hitter. Blocking line covers the sideline half of
-	// their zone; blocking cross covers the half toward the middle of the court.
-	const blockBar = $derived.by(() => {
+	const bar = $derived.by(() => {
 		const block = a?.calls?.block ?? defencePreview?.block;
-		if (!block || !defending) return null;
-		const box = zoneBox(defending, 2, bottom);
-		const half = box.w / 2;
-		// Zone 2 is on the right of the screen for the bottom team and, mirrored, on the left for the top.
-		const near = defending === bottom;
-		const sidelineHalf = near ? box.x + half : box.x;
-		const middleHalf = near ? box.x : box.x + half;
-		const x = (block === 'line' ? sidelineHalf : middleHalf) + 4;
-		return { x, y: near ? VIEW.netY + 6 : VIEW.netY - 12, w: half - 8, label: block, near };
+		return block && defending ? { ...blockBar(defending, block, bottom), label: block } : null;
 	});
 </script>
 
@@ -235,7 +163,7 @@
 				{@const b = zoneBox(team, zone, bottom)}
 				<rect
 					class="zone"
-					class:landing={team === defending && zone === a?.landing && !stopped}
+					class:landing={landed && team === defending && zone === a?.landing && !stopped}
 					x={b.x}
 					y={b.y}
 					width={b.w}
@@ -276,10 +204,10 @@
 		{/if}
 
 		<rect class="net" x="8" y={VIEW.netY - 4} width={VIEW.width - 16} height="8" />
-		{#if blockBar}
-			<rect class="block" x={blockBar.x} y={blockBar.y} width={blockBar.w} height="6" rx="2" />
-			<text class="block-label" x={blockBar.x + blockBar.w / 2} y={blockBar.near ? blockBar.y + 16 : blockBar.y - 4}>
-				blocks {blockBar.label}
+		{#if bar}
+			<rect class="block" x={bar.x} y={bar.y} width={bar.w} height="6" rx="2" />
+			<text class="block-label" x={bar.x + bar.w / 2} y={bar.near ? bar.y + 16 : bar.y - 4}>
+				blocks {bar.label}
 			</text>
 		{/if}
 		{#if shot}
@@ -312,7 +240,7 @@
 
 		{#each TEAMS as team (team)}
 			{#each ['blocker', 'defender'] as const as slot (slot)}
-				{@const at = zoneCenter(team, pos[team][slot], bottom)}
+				{@const at = frame.spots[team][slot]}
 				<PlayerChip
 					player={game.teams[team][slot]}
 					{team}
@@ -320,10 +248,11 @@
 					role={roleOf(game, team, slot)}
 					x={at.x}
 					y={at.y}
+					{glide}
 					hitter={a?.team === team && a.hitter === slot}
-					action={actions[`${team}-${slot}`] ?? null}
+					action={frame.actions[`${team}-${slot}`] ?? null}
 					actionKey={game.steps}
-					lunge={Math.sign(ballTarget.x - at.x) || 1}
+					lunge={Math.sign(rest.x - at.x) || 1}
 					pips={game.pips ? game.pips[team][slot] : null}
 				/>
 			{/each}
@@ -331,34 +260,29 @@
 
 		{#if scored}
 			{#key game.steps}
-				<circle class="impact" class:big={moment?.impact === 'smash'} cx={ballSpot.x} cy={ballSpot.y} r="10" />
+				<circle class="impact" class:big={moment?.impact === 'smash'} cx={rest.x} cy={rest.y} r="10" />
 				<!-- A tip lands softly: rings spread out from where it drops. -->
 				{#if moment?.impact === 'tip'}
 					{#each [0, 1, 2] as i (i)}
-						<circle class="ripple" style:animation-delay="{paced(250 + i * 180)}ms" cx={ballSpot.x} cy={ballSpot.y} r="8" />
+						<circle class="ripple" style:animation-delay="{paced(250 + i * 180)}ms" cx={rest.x} cy={rest.y} r="8" />
 					{/each}
 				{/if}
 			{/key}
 		{/if}
 
-		{#each earlier as path, i (i)}
-			<path class="trail earlier" d={path} />
+		{#each flights as f (f.key)}
+			<path class="trail" d={f.d} />
 		{/each}
-		{#if trail}
-			{#key flight}
-				<path class="trail" d={trail} />
-			{/key}
-		{/if}
 		<ellipse
 			class="shadow"
-			cx={ball.ground.x}
-			cy={ball.ground.y + 6}
-			rx={6 - ball.height / 30}
-			ry={2.5 - ball.height / 80}
-			opacity={0.45 - ball.height / 250}
+			cx={frame.ball.ground.x}
+			cy={frame.ball.ground.y + 6}
+			rx={6 - frame.ball.height / 30}
+			ry={2.5 - frame.ball.height / 80}
+			opacity={0.45 - frame.ball.height / 250}
 		/>
 		<!-- A yellow-and-blue beach ball, drawn at radius 7, shown at 9 and scaled up as it rises. -->
-		<g class="ball" transform="translate({ball.x} {ball.y}) scale({1.3 + ball.height / 126})">
+		<g class="ball" transform="translate({frame.ball.x} {frame.ball.y}) scale({1.3 + frame.ball.height / 126})">
 			<circle r="7" />
 			<path d="M-6.2 -3.2 Q0 -1 6.2 -3.2 M-4.5 5.3 Q-1 0 0 -7 M4.5 5.3 Q1 0 0 -7" />
 		</g>
@@ -537,15 +461,13 @@
 			opacity: 0.06;
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.point-trace {
-			animation: none;
-			stroke-dashoffset: 0;
-		}
-		.point-tint {
-			animation: none;
-			opacity: 0.06;
-		}
+	:global([data-motion='reduced']) .point-trace {
+		animation: none;
+		stroke-dashoffset: 0;
+	}
+	:global([data-motion='reduced']) .point-tint {
+		animation: none;
+		opacity: 0.06;
 	}
 	.impact {
 		fill: none;
@@ -580,12 +502,10 @@
 			opacity: 0;
 		}
 	}
-	@media (prefers-reduced-motion: reduce) {
-		.impact,
-		.ripple {
-			animation: none;
-			opacity: 0;
-		}
+	:global([data-motion='reduced']) .impact,
+	:global([data-motion='reduced']) .ripple {
+		animation: none;
+		opacity: 0;
 	}
 	svg {
 		width: 100%;
@@ -637,17 +557,14 @@
 		stroke: var(--actual);
 		stroke-width: 2.5;
 	}
-	/* Where the ball actually went: solid, since dashed lines are only for the shot that was called. */
+	/* Where the ball actually went: solid, since dashed lines are only for the shot that was called.
+	   Each flight starts bright and fades back as play moves on. */
 	.trail {
 		fill: none;
 		stroke: var(--actual);
 		stroke-width: 1.25;
 		stroke-linecap: round;
 		animation: trail calc(1200ms * var(--pace, 1)) ease-out forwards;
-	}
-	.trail.earlier {
-		animation: none;
-		opacity: 0.35;
 	}
 	@keyframes trail {
 		from {
