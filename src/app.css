@@ -23,6 +23,8 @@
 	--covered-bg: #f7c1c1;
 	--open: #3b6d11;
 	--open-bg: #c0dd97;
+	/* Special charges (the ?specials prototype). */
+	--special: #b07a00;
 	color-scheme: light dark;
 	font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
 	line-height: 1.5;
@@ -51,6 +53,7 @@
 		--covered-bg: #791f1f;
 		--open: #97c459;
 		--open-bg: #27500a;
+		--special: #f5c542;
 	}
 }
 

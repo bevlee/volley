@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { cubicOut } from 'svelte/easing';
 	import { Tween } from 'svelte/motion';
+	import { config } from '#lib/engine/config.ts';
 	import type { Player, TeamId } from '#lib/engine/types.ts';
 	import type { Role } from './layout';
 	import { paced } from './pace.svelte';
@@ -16,7 +17,8 @@
 		hitter = false,
 		action = null,
 		actionKey = 0,
-		lunge = 1
+		lunge = 1,
+		pips = null
 	}: {
 		player: Player;
 		team: TeamId;
@@ -32,6 +34,8 @@
 		actionKey?: number;
 		/** Which way a dive goes across the court: −1 left, 1 right (toward the ball). */
 		lunge?: number;
+		/** Special charges this player has (the ?specials prototype); null when charges are off. */
+		pips?: number | null;
 	} = $props();
 
 	const W = 80;
@@ -40,6 +44,12 @@
 	const pos = Tween.of(() => ({ x, y }), { duration: () => paced(350), easing: cubicOut });
 	// The top team faces down the screen, so their dives lunge the other way.
 	const facing = $derived(near ? -1 : 1);
+	/**
+	 * Charge dots on the chip's top edge (dice land just under it): one per possible charge, filled
+	 * for the ones the player has.
+	 */
+	const PIP_R = 3.2;
+	const PIP_GAP = 9;
 </script>
 
 <g class="chip {team}" class:hitter transform="translate({pos.current.x - W / 2} {pos.current.y - H / 2})">
@@ -52,7 +62,16 @@
 		</g>
 	{/key}
 	{#if action?.label}
-		<text class="action" x={W / 2} y="-6">{action.label}</text>
+		<text class="action" x={W / 2} y={pips === null ? -6 : -10}>{action.label}</text>
+	{/if}
+	{#if pips !== null}
+		<g class="pips" aria-label="{pips} special charges">
+			{#each { length: config.maxPips } as _, i (i)}
+				{#key i < pips}
+					<circle class:full={i < pips} cx={W / 2 + (i - (config.maxPips - 1) / 2) * PIP_GAP} cy="0" r={PIP_R} />
+				{/key}
+			{/each}
+		</g>
 	{/if}
 </g>
 
@@ -96,6 +115,23 @@
 	.stats {
 		font-size: 10px;
 		font-weight: 400;
+	}
+	.pips circle {
+		fill: var(--bg);
+		stroke: var(--special);
+		stroke-width: 1.2;
+	}
+	.pips circle.full {
+		fill: var(--special);
+		opacity: 1;
+		animation: charge calc(500ms * var(--pace, 1)) ease-out;
+		transform-box: fill-box;
+		transform-origin: center;
+	}
+	@keyframes charge {
+		40% {
+			transform: scale(1.8);
+		}
 	}
 	.action {
 		font-size: 10px;
@@ -152,7 +188,8 @@
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.body {
+		.body,
+		.pips circle.full {
 			animation: none;
 		}
 	}

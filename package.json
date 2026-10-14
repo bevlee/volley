@@ -13,6 +13,13 @@
 		"test:unit": "vitest",
 		"test": "vitest run",
 		"sim": "tsx scripts/sim.ts",
+		"sim:smart": "tsx scripts/smart-vs-random.ts",
+		"sim:gating": "tsx scripts/gating.ts",
+		"sim:serve": "tsx scripts/serve.ts",
+		"sim:blocks": "tsx scripts/blocks.ts",
+		"sim:specials": "tsx scripts/specials.ts",
+		"sim:run": "tsx scripts/run.ts",
+		"sim:abilities": "tsx scripts/abilities.ts",
 		"start": "tsx server/index.ts"
 	},
 	"devDependencies": {

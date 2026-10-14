@@ -1,3 +1,4 @@
+import { config } from '../engine/config';
 import { other, partner } from '../engine/rally';
 import { firstTouch } from '../engine/rules';
 import type { Game, LogEntry, Phase, Shot, Slot, TeamId } from '../engine/types';
@@ -19,7 +20,8 @@ const find = (entries: LogEntry[], tag: string): Data | undefined =>
 export const SHOT_PHRASE: Record<Shot, string> = {
 	line: 'down the line',
 	cross: 'cross-court',
-	tip: 'for a tip'
+	tip: 'for a tip',
+	over: 'to dig it over deep'
 };
 
 /** One plain word per way a point ends: kill, block or error. */
@@ -44,8 +46,16 @@ export function narrate(e: LogEntry): string {
 			return `${touchGrade(Number(d.mod))} pass from ${d.player}`;
 		case 'set':
 			return `${setGrade(Number(d.mod))} set from ${d.player}${d.source === 'touch' ? ' off the block' : ''}`;
-		case 'calls':
-			return `${d.hitter} is going ${SHOT_PHRASE[d.shot as Shot]} · ${d.blocker} takes away the ${d.block} · ${d.defender} ${d.stance === 'deep' ? 'stays deep' : 'creeps in for the tip'}`;
+		case 'calls': {
+			const hitter = `${d.hitter}${d.special ? ' ★' : ''}`;
+			const blocker = `${d.blocker}${d.defenceSpecial === 'block' ? ' ★' : ''}`;
+			const defender = `${d.defender}${d.defenceSpecial === 'dig' ? ' ★' : ''}`;
+			return `${hitter} is going ${SHOT_PHRASE[d.shot as Shot]} · ${blocker} takes away the ${d.block} · ${defender} ${d.stance === 'deep' ? 'stays deep' : 'creeps in for the tip'}`;
+		}
+		case 'pips':
+			return Number(d.gained) > 0
+				? `★ ${d.player} charges up · ${d.pips} of ${config.maxPips}`
+				: `★ ${d.player} is fully charged`;
 		case 'swing':
 			if (d.die === 6) return `${d.player} gets a perfect set and swings`;
 			return d.shot === 'tip' ? `${d.player} tips it into the net` : `${d.player} hits it into the net`;

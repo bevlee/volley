@@ -60,6 +60,8 @@
 	} = $props();
 
 	const SHOTS: Shot[] = ['line', 'cross', 'tip'];
+	/** A shot's name on the court: a dig over lands deep. */
+	const SHOT_TAG: Record<Shot, string> = { line: 'line', cross: 'cross', tip: 'tip', over: 'deep' };
 	/** A read shot is one the defender is standing in position for. */
 	const COVER_WORD = { blocked: 'blocked', read: 'covered', open: 'open' } as const;
 
@@ -75,6 +77,8 @@
 	const calledShot = $derived(a?.calls?.shot ?? preview);
 	const target = $derived(calledShot && a ? TARGET[calledShot] : null);
 	const ballTarget = $derived(staged?.ball ?? ballAt(game, pos, bottom));
+	/** The shots the attacking side might play: in run mode, a dig over to deep middle too. */
+	const shots = $derived(a && (game.teams[a.team].runKit || game.teams[a.team].playbook) ? [...SHOTS, 'over' as const] : SHOTS);
 	/** What the defence covers, once it's called or while the player sets theirs up. */
 	const covers = $derived.by(() => {
 		const d = a?.calls ?? defencePreview;
@@ -242,19 +246,19 @@
 		{/each}
 
 		{#if defending && covers}
-			{#each SHOTS as s (s)}
+			{#each shots as s (s)}
 				{@const b = zoneBox(defending, TARGET[s], bottom)}
 				{@const tag = tagAt(defending, s)}
 				<rect class="cover {covers[s]}" x={b.x + 1} y={b.y + 1} width={b.w - 2} height={b.h - 2} />
 				<text class="cover-tag {covers[s]}" x={tag.x} y={tag.y}>
-					<tspan class="shot-name">{s}</tspan>
+					<tspan class="shot-name">{SHOT_TAG[s]}</tspan>
 					<tspan x={tag.x} dy="13">{COVER_WORD[covers[s]]}</tspan>
 				</text>
 			{/each}
 		{:else if defending && onshot}
-			{#each SHOTS as s (s)}
+			{#each shots as s (s)}
 				{@const tag = tagAt(defending, s)}
-				<text class="cover-tag pick" x={tag.x} y={tag.y}>{s}</text>
+				<text class="cover-tag pick" x={tag.x} y={tag.y}>{SHOT_TAG[s]}</text>
 			{/each}
 		{/if}
 
@@ -320,6 +324,7 @@
 					action={actions[`${team}-${slot}`] ?? null}
 					actionKey={game.steps}
 					lunge={Math.sign(ballTarget.x - at.x) || 1}
+					pips={game.pips ? game.pips[team][slot] : null}
 				/>
 			{/each}
 		{/each}
@@ -359,7 +364,7 @@
 		</g>
 
 		{#if defending && onshot}
-			{#each SHOTS as s (s)}
+			{#each shots as s (s)}
 				{@const b = zoneBox(defending, TARGET[s], bottom)}
 				<rect
 					class="pick-zone"

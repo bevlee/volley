@@ -128,7 +128,7 @@ export type Cover = 'blocked' | 'read' | 'open';
 export function coverage(block: Channel, stance: Stance): Record<Shot, Cover> {
 	const cover = (shot: Shot): Cover =>
 		shot === block ? 'blocked' : isRead(shot, block, stance) ? 'read' : 'open';
-	return { line: cover('line'), cross: cover('cross'), tip: cover('tip') };
+	return { line: cover('line'), cross: cover('cross'), tip: cover('tip'), over: cover('over') };
 }
 
 /** Where the players who roll in a step stand to roll: a setter moves to the setting spot first. */

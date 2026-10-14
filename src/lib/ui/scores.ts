@@ -138,7 +138,8 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 						value: num(share),
 						tip: 'Rounded down.'
 					}
-				])
+				]),
+		...(a.calls?.special ? [{ label: `★ ${hitter.name}'s special`, value: `${config.specialHitPower}`, tip: 'A charge spent on the hit.' }] : [])
 	];
 	const attack: Score = {
 		who: hitter.name,
@@ -158,7 +159,8 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 						{ label: 'Aim roll', value: `${die('aim') ?? '?'}` },
 						{ label: FIRST_SCORE[a.source], value: num(a.firstMod) },
 						{ label: 'Set score', value: num(a.setMod) },
-						{ label: `${setter.name}'s Atk (setter)`, value: `${setter.attack}` }
+						{ label: `${setter.name}'s Atk (setter)`, value: `${setter.attack}` },
+						...(a.calls?.special ? [{ label: `★ ${hitter.name}'s special`, value: `${config.specialHitAccuracy}` }] : [])
 					],
 					scale: [
 						{ label: `${config.accuracyExact} or more`, value: 'On target', result: 'exact' },
@@ -217,7 +219,8 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 				{ label: 'Block roll', value: `${die('block') ?? '?'}` },
 				shot === a.calls?.block
 					? { label: `Blocked the ${shot}`, value: `${config.blockBonus}`, tip: 'For reading the attack.' }
-					: { label: 'Hit into the block', value: `${config.blockBonus}`, tip: 'The aim was so far off the shot went straight into the blocker.' }
+					: { label: 'Hit into the block', value: `${config.blockBonus}`, tip: 'The aim was so far off the shot went straight into the blocker.' },
+				...(a.calls?.defenceSpecial === 'block' ? [{ label: `★ ${b.name}'s special`, value: `${config.specialBlock}`, tip: 'A charge spent on the block.' }] : [])
 			],
 			total: Number(blocked.total),
 			totalNote: '',
@@ -254,6 +257,9 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 		// always dig with full Def as well.
 		if (dug.read && shot) {
 			digTerms.push({ label: 'Read the attack', value: `${config.readBonus}`, note: `${d.name} was covering the ${shot} that was called.` });
+		}
+		if (a.calls?.defenceSpecial === 'dig') {
+			digTerms.push({ label: `★ ${d.name}'s special`, value: `${config.specialDig}`, tip: 'A charge spent on the dig.' });
 		}
 		dig = {
 			who: d.name,

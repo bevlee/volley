@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
-	import type { Channel, Game, Shot, Stance, TeamId } from '#lib/engine/types.ts';
+	import { config } from '#lib/engine/config.ts';
+	import { other } from '#lib/engine/rally.ts';
+	import { attackOptionsIn, blockModesFor, SHOTS } from '#lib/engine/rules.ts';
+	import type { AttackOption, BlockMode, Channel, DefenceSpecial, Game, Shot, Stance, TeamId, Tempo } from '#lib/engine/types.ts';
 	import BuildUp from './BuildUp.svelte';
 	import Controls from './Controls.svelte';
 	import Court from './Court.svelte';
@@ -69,8 +72,10 @@
 		overDisabled?: boolean;
 		/** Space or the step button when there's no call to make: serve, play on, next rally. */
 		onadvance: () => void;
-		onshot: (shot: Shot) => void;
-		ondefence: (defence: { block: Channel; stance: Stance }) => void;
+		/** `tempo` when set tempos are in play; `special` when the hitter spends a charge (the ?specials prototype). */
+		onshot: (shot: Shot, extra?: { tempo?: Tempo; special?: boolean }) => void;
+		/** `blockMode` when block modes are in play; `spend` when the blocker or digger spends a charge (the ?specials prototype). */
+		ondefence: (defence: { block: Channel; stance: Stance; blockMode?: BlockMode; spend?: DefenceSpecial }) => void;
 		/** The game-over button. */
 		onover: () => void;
 		/** The court has played out everything up to `game`, the latest state (online: start my clock). */
@@ -106,10 +111,59 @@
 	/** The shot the player is hovering, previewed on the court. */
 	let preview = $state<Shot | null>(null);
 	/** The shot the player has picked for their attack; Space hits it. Kept between attacks as their default. */
-	let shotPick = $state<Shot>('line');
+	let shotPick = $state<AttackOption>({ shot: 'line' });
 	/** The defence the player is setting up; kept between rallies as their default. */
-	let defence = $state<{ block: Channel; stance: Stance }>({ block: 'line', stance: 'deep' });
+	let defence = $state<{ block: Channel; stance: Stance; blockMode: BlockMode }>({ block: 'line', stance: 'deep', blockMode: 'commit' });
+	/** The ?specials prototype: whether the player's attack spends a charge, and where their defence spends one. Reset after each call. */
+	let special = $state(false);
+	let spend = $state<DefenceSpecial>('none');
+	/** Who could spend a charge on this attack, and how many they have; null when charges are off. */
+	const charges = $derived.by(() => {
+		const a = view.attack;
+		if (!view.pips || !a) return null;
+		const mine = view.teams[a.team];
+		const theirs = view.teams[other(a.team)];
+		const pips = view.pips;
+		return {
+			hitter: mine[a.hitter].name,
+			hitterPips: pips[a.team][a.hitter],
+			blocker: theirs.blocker.name,
+			blockerPips: pips[other(a.team)].blocker,
+			digger: theirs.defender.name,
+			diggerPips: pips[other(a.team)].defender
+		};
+	});
 	const choosing = $derived(needsShot(view, controlled) && view === game && !locked);
+	/**
+	 * The attacks the player can pick from: the hitter's options when tempos or run rules are in play
+	 * (their abilities, the set), or the three shots of a normal game.
+	 */
+	const choices = $derived.by((): (AttackOption & { label: string })[] => {
+		const a = view.attack;
+		const t = a && view.teams[a.team];
+		const detailed = a && a.setMod !== undefined && (config.blockModes || t?.runKit || t?.playbook);
+		const options: AttackOption[] = detailed ? attackOptionsIn(view) : SHOTS.map((shot) => ({ shot }));
+		return options.map((o) => ({ ...o, label: attackLabel(o) }));
+	});
+	function attackLabel({ shot, tempo }: AttackOption): string {
+		if (shot === 'over') return 'Dig over';
+		if (shot === 'tip') return 'Tip';
+		const name = shot === 'line' ? 'line' : 'cross';
+		return tempo === 'fast' ? `Quick ${name}` : tempo === 'high' ? `High ${name}` : name[0].toUpperCase() + name.slice(1);
+	}
+	const samePick = (x: AttackOption, y: AttackOption) => x.shot === y.shot && x.tempo === y.tempo;
+	// A pick from an earlier attack that this hitter can't make falls back to their first option.
+	$effect(() => {
+		if (choosing && choices.length && !choices.some((c) => samePick(c, shotPick))) shotPick = { shot: choices[0].shot, tempo: choices[0].tempo };
+	});
+	/** How the player's blocker can play it, when block modes are in play; null otherwise. */
+	const modes = $derived.by((): BlockMode[] | null => {
+		const a = view.attack;
+		return config.blockModes && a ? blockModesFor(view.teams[other(a.team)].blocker) : null;
+	});
+	$effect(() => {
+		if (modes && !modes.includes(defence.blockMode)) defence.blockMode = 'commit';
+	});
 	const defending = $derived(needsDefence(view, controlled) && view === game && !locked);
 	/** The latest attack's numbers. They stay up after the attack, until a new possession or rally starts (see clearsSheet). */
 	let sheet = $state.raw<ScoreSheet | null>(null);
@@ -244,26 +298,43 @@
 	};
 
 	function setDefence() {
-		if (defending) ondefence({ ...defence });
+		if (!defending) return;
+		const has = { none: true, block: !!charges?.blockerPips, dig: !!charges?.diggerPips };
+		ondefence({
+			block: defence.block,
+			stance: defence.stance,
+			...(modes && { blockMode: defence.blockMode }),
+			...(charges && { spend: has[spend] ? spend : 'none' })
+		});
+		spend = 'none';
 	}
 
 	function attack() {
 		if (!choosing) return;
 		preview = null;
-		onshot(shotPick);
+		onshot(shotPick.shot, { tempo: shotPick.tempo, special: special && !!charges?.hitterPips });
+		special = false;
 	}
 
 	const DEFENCE_KEYS: Record<string, () => void> = {
 		'1': () => (defence.block = 'line'),
 		'2': () => (defence.block = 'cross'),
 		'3': () => (defence.stance = 'deep'),
-		'4': () => (defence.stance = 'short')
+		'4': () => (defence.stance = 'short'),
+		'7': () => modes?.includes('commit') && (defence.blockMode = 'commit'),
+		'8': () => modes?.includes('read') && (defence.blockMode = 'read'),
+		'9': () => modes?.includes('none') && (defence.blockMode = 'none')
 	};
 
-	/** Picking a shot only selects it; Space (or the Attack button) hits it. */
-	const choose = (shot: Shot) => (shotPick = shot);
+	/** Picking an attack only selects it; Space (or the Attack button) hits it. */
+	const choose = (o: AttackOption) => (shotPick = { shot: o.shot, tempo: o.tempo });
+	/** Clicking a zone on the court picks the first attack at it. */
+	const chooseShot = (shot: Shot) => {
+		const o = choices.find((c) => c.shot === shot);
+		if (o) choose(o);
+	};
 
-	const SHOT_KEYS: Record<string, Shot> = { '1': 'line', l: 'line', '2': 'cross', c: 'cross', '3': 'tip', t: 'tip' };
+	const SHOT_KEYS: Record<string, Shot> = { l: 'line', c: 'cross', t: 'tip' };
 
 	/** Space or → steps, unless you're typing in a box or a button already has focus. */
 	function onkeydown(e: KeyboardEvent) {
@@ -274,10 +345,27 @@
 		if (rules.isOpen()) return;
 		if (ondebug && (e.key === 'd' || e.key === 'D')) return ondebug();
 		if (ondebug && e.key === 'Escape' && debugOpen) return ondebug();
+		if (charges && choosing && e.key.toLowerCase() === 's' && charges.hitterPips) {
+			e.preventDefault();
+			special = !special;
+			return;
+		}
+		if (charges && defending && (e.key === '5' || e.key === '6')) {
+			e.preventDefault();
+			const on: DefenceSpecial = e.key === '5' ? 'block' : 'dig';
+			if (on === 'block' ? charges.blockerPips : charges.diggerPips) spend = spend === on ? 'none' : on;
+			return;
+		}
+		// Number keys pick the attacks in order; L, C and T pick by shot.
+		const numbered = choices[Number(e.key) - 1];
+		if (choosing && /^[1-9]$/.test(e.key) && numbered) {
+			e.preventDefault();
+			return choose(numbered);
+		}
 		const shot = SHOT_KEYS[e.key.toLowerCase()];
 		if (shot && choosing) {
 			e.preventDefault();
-			return choose(shot);
+			return chooseShot(shot);
 		}
 		if (defending && DEFENCE_KEYS[e.key]) {
 			e.preventDefault();
@@ -311,9 +399,9 @@
 		{dice}
 		{staged}
 		{bottom}
-		preview={choosing ? (preview ?? shotPick) : null}
+		preview={choosing ? (preview ?? shotPick.shot) : null}
 		defencePreview={defending ? defence : null}
-		onshot={choosing ? choose : null}
+		onshot={choosing ? chooseShot : null}
 		onpreview={(s) => (preview = s)}
 	/>
 	{#if dock}<div bind:clientHeight={dockH}>{@render dock()}</div>{/if}
@@ -323,10 +411,15 @@
 		feed={mode === 'feed' ? commentary(view) : null}
 		{choosing}
 		{defending}
+		{charges}
+		bind:special
+		bind:spend
 		bind:defence
 		ondefend={setDefence}
-		shot={shotPick}
-		onshot={choose}
+		{choices}
+		{modes}
+		pick={shotPick}
+		onpick={choose}
 		onattack={attack}
 		onpreview={(s) => (preview = s)}
 		over={view.phase.kind === 'gameOver'}

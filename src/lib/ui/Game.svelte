@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { withDefence, withShot, type Choosers } from '#lib/engine/choosers.ts';
+	import { config } from '#lib/engine/config.ts';
 	import { newGame, playGame, step } from '#lib/engine/rally.ts';
 	import type { Game, TeamId } from '#lib/engine/types.ts';
 	import DebugDrawer from './DebugDrawer.svelte';
@@ -16,9 +17,26 @@
 
 	const randomSeed = () => Math.floor(Math.random() * 1_000_000);
 
+	/**
+	 * Prototype (?specials): players earn special charges from great touches and spend them on their
+	 * hit, block or dig. ?pips=n starts everyone with n. These games aren't saved: replays don't know
+	 * the rule yet.
+	 */
+	const params = new URLSearchParams(location.search);
+	config.specials = params.has('specials');
+	const startPips = Math.min(config.maxPips, Number(params.get('pips')) || 0);
+	function freshGame(seed: number): Game {
+		const g = newGame(seed);
+		if (config.specials) {
+			const pips = () => ({ blocker: startPips, defender: startPips });
+			g.pips = { A: pips(), B: pips() };
+		}
+		return g;
+	}
+
 	const firstSeed = randomSeed();
 	let seed = $state(firstSeed);
-	const initial = newGame(firstSeed);
+	const initial = freshGame(firstSeed);
 	let screen: GameScreen;
 	let shown = $state.raw<Game>(initial);
 	/** The team whose calls the player makes; null to just watch. */
@@ -33,7 +51,7 @@
 
 	/** Once play reaches the end of the game, saves it, if the player made any of its calls. */
 	async function saveIfOver(g: Game) {
-		if (g.phase.kind !== 'gameOver' || save || !controlled || !makers.size) return;
+		if (g.phase.kind !== 'gameOver' || save || !controlled || !makers.size || config.specials) return;
 		const no = gameNo;
 		save = { kind: 'saving' };
 		const result = await saveVsComputer(g, makers, controlled);
@@ -83,7 +101,7 @@
 		makers = new Map();
 		save = null;
 		gameNo++;
-		screen.jumpTo(newGame(Number(seed) || 0));
+		screen.jumpTo(freshGame(Number(seed) || 0));
 	}
 	const newSeed = () => {
 		seed = randomSeed();
@@ -102,8 +120,8 @@
 	{initial}
 	{controlled}
 	onadvance={() => play()}
-	onshot={(shot) => playerCall('shot', withShot(shot))}
-	ondefence={(d) => playerCall('defence', withDefence(d.block, d.stance))}
+	onshot={(shot, extra) => playerCall('shot', { ...withShot(shot), special: () => extra?.special ?? false })}
+	ondefence={(d) => playerCall('defence', { ...withDefence(d.block, d.stance), defenceSpecial: () => d.spend ?? 'none' })}
 	onover={newSeed}
 	{debugOpen}
 	ondebug={admin ? () => (debugOpen = !debugOpen) : null}

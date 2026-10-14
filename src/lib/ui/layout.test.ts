@@ -297,12 +297,12 @@ describe('previewDefence', () => {
 
 describe('coverage', () => {
 	it('blocks the matching hard shot, reads the other with a deep defender, and leaves the tip open', () => {
-		expect(coverage('line', 'deep')).toEqual({ line: 'blocked', cross: 'read', tip: 'open' });
-		expect(coverage('cross', 'deep')).toEqual({ line: 'read', cross: 'blocked', tip: 'open' });
+		expect(coverage('line', 'deep')).toEqual({ line: 'blocked', cross: 'read', tip: 'open', over: 'read' });
+		expect(coverage('cross', 'deep')).toEqual({ line: 'read', cross: 'blocked', tip: 'open', over: 'read' });
 	});
 	it('reads the tip with a short defender, leaving the unblocked hard shot open', () => {
-		expect(coverage('line', 'short')).toEqual({ line: 'blocked', cross: 'open', tip: 'read' });
-		expect(coverage('cross', 'short')).toEqual({ line: 'open', cross: 'blocked', tip: 'read' });
+		expect(coverage('line', 'short')).toEqual({ line: 'blocked', cross: 'open', tip: 'read', over: 'open' });
+		expect(coverage('cross', 'short')).toEqual({ line: 'open', cross: 'blocked', tip: 'read', over: 'open' });
 	});
 });
 

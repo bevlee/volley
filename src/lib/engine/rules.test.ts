@@ -4,6 +4,8 @@ import {
 	accuracy,
 	adjacent,
 	aimResult,
+	availableBlocks,
+	availableShots,
 	blockResult,
 	defenderZone,
 	digTotal,
@@ -181,5 +183,37 @@ describe('gameWinner', () => {
 		expect(gameWinner({ A: T, B: T - 1 })).toBeNull();
 		expect(gameWinner({ A: T + 3, B: T + 5 })).toBe('B');
 		expect(gameWinner({ A: T - 1, B: 0 })).toBeNull();
+	});
+});
+
+describe('shot gating', () => {
+	const gated = (minSet: typeof config.minSet, check: () => void) => {
+		const before = config.minSet;
+		try {
+			config.minSet = minSet;
+			check();
+		} finally {
+			config.minSet = before;
+		}
+	};
+
+	it('leaves every shot and block on by default', () => {
+		expect(availableShots(-4)).toEqual(['line', 'cross', 'tip']);
+		expect(availableBlocks(-4)).toEqual(['line', 'cross']);
+	});
+
+	it('takes a shot off below its cut-off, and the block for it with it', () => {
+		gated({ line: 0, cross: null, tip: null }, () => {
+			expect(availableShots(0)).toEqual(['line', 'cross', 'tip']);
+			expect(availableShots(-1)).toEqual(['cross', 'tip']);
+			expect(availableBlocks(-1)).toEqual(['cross']);
+		});
+	});
+
+	it('leaves either block when no hard shot is on', () => {
+		gated({ line: 2, cross: -1, tip: null }, () => {
+			expect(availableShots(-2)).toEqual(['tip']);
+			expect(availableBlocks(-2)).toEqual(['line', 'cross']);
+		});
 	});
 });

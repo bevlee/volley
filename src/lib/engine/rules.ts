@@ -1,7 +1,77 @@
 import { config } from './config';
-import type { AimResult, BlockResult, Channel, Shot, Stance, TeamId, Zone } from './types';
+import type { AbilityId, AimResult, AttackOption, BlockMode, BlockResult, Channel, DefenceSpecial, Game, Player, Shot, Slot, Stance, Team, TeamId, Tempo, Zone } from './types';
 
 export const ZONES: readonly Zone[] = [1, 2, 3, 4, 5, 6];
+/** The shots of a normal game. A dig over (`over`) is run mode only. */
+export const SHOTS: readonly Shot[] = ['line', 'cross', 'tip'];
+const CHANNELS: readonly Channel[] = ['line', 'cross'];
+const TEMPOS: readonly Tempo[] = ['fast', 'high'];
+const BLOCK_MODES: readonly BlockMode[] = ['commit', 'read', 'none'];
+
+export const has = (player: Player, ability: AbilityId) => player.abilities?.includes(ability) ?? false;
+
+/** A soft shot goes over the block rather than through it: a tip, or a dig over. */
+export const isSoft = (shot: Shot) => shot === 'tip' || shot === 'over';
+
+/** The shots on off a set this good: each needs at least its `config.minSet`. */
+export const availableShots = (setMod: number): Shot[] =>
+	SHOTS.filter((shot) => setMod >= (config.minSet[shot] ?? -Infinity));
+
+/** The blocks worth making off this set: the channels of the hard shots still on, or either when none are. */
+export function availableBlocks(setMod: number): Channel[] {
+	return blocksAgainst(availableShots(setMod));
+}
+
+function blocksAgainst(shots: Shot[]): Channel[] {
+	const open = CHANNELS.filter((channel) => shots.includes(channel));
+	return open.length ? open : [...CHANNELS];
+}
+
+/**
+ * Every attack `hitter` can make off a set this good. A normal game has every shot the set leaves on
+ * (and every tempo, when tempos are in play). In run mode an opponent attacks only from its playbook,
+ * and the player's team from the run kit (high line and cross, and dig over) plus abilities: Tip,
+ * Quick. Either way line needs a good enough set (Line specialist: one worse), and a quick set a good
+ * one. A dig over is always on.
+ */
+export function attackOptions(team: Team, hitter: Player, setMod: number): AttackOption[] {
+	if (!team.playbook && !team.runKit) {
+		const tempos: (Tempo | undefined)[] = config.blockModes ? [...TEMPOS] : [undefined];
+		return availableShots(setMod).flatMap((shot) => tempos.map((tempo) => ({ shot, tempo })));
+	}
+	const kit: AttackOption[] = team.playbook ?? [
+		{ shot: 'line', tempo: 'high' },
+		{ shot: 'cross', tempo: 'high' },
+		...(has(hitter, 'tip') ? [{ shot: 'tip' as const, tempo: 'high' as const }] : []),
+		...(has(hitter, 'quick')
+			? [
+					{ shot: 'line' as const, tempo: 'fast' as const },
+					{ shot: 'cross' as const, tempo: 'fast' as const }
+				]
+			: [])
+	];
+	const lineMin = (config.minSet.line ?? -Infinity) - (has(hitter, 'lineSpecialist') ? config.abilities.lineSpecialistSets : 0);
+	const quickMin = config.quickMinSet;
+	const open = kit.filter(
+		({ shot, tempo }) => (shot !== 'line' || setMod >= lineMin) && (tempo !== 'fast' || setMod >= quickMin) && shot !== 'over'
+	);
+	return [...open, { shot: 'over', tempo: 'high' }];
+}
+
+/** The attacks open to the side attacking now. */
+export function attackOptionsIn(g: Game): AttackOption[] {
+	const a = g.attack!;
+	const team = g.teams[a.team];
+	return attackOptions(team, team[a.hitter], a.setMod!);
+}
+
+/** The blocks worth making against the side attacking now: the channels of its hard shots, or either. */
+export const blocksIn = (g: Game): Channel[] => blocksAgainst(attackOptionsIn(g).map((o) => o.shot));
+
+/** How the defending blocker can play it. Every mode, for now: no ability takes one away. */
+export function blockModesFor(_blocker: Player): BlockMode[] {
+	return [...BLOCK_MODES];
+}
 
 /** Row and column of each zone from the team's own view: front row 4-3-2, back row 5-6-1. */
 export const GRID: Record<Zone, readonly [row: number, col: number]> = {
@@ -13,8 +83,8 @@ export const GRID: Record<Zone, readonly [row: number, col: number]> = {
 	1: [1, 2]
 };
 
-/** Attacks always come from the attacker's left, so on the defending side line is zone 1 and cross is zone 5. */
-export const TARGET: Record<Shot, Zone> = { line: 1, cross: 5, tip: 3 };
+/** Attacks always come from the attacker's left, so on the defending side line is zone 1 and cross is zone 5. A dig over goes deep middle. */
+export const TARGET: Record<Shot, Zone> = { line: 1, cross: 5, tip: 3, over: 6 };
 
 export function ladder(total: number): number {
 	if (total >= 6) return 2;
@@ -27,6 +97,21 @@ export function ladder(total: number): number {
 /** The first touch's bonus from the pass or dig roll alone: softer than the set's ladder, and neutral on average. */
 const FIRST_TOUCH = [-2, -1, 0, 0, 1, 2];
 export const firstTouch = (die: number) => FIRST_TOUCH[die - 1];
+
+/** Where a defending side can spend a charge: on the block if the blocker has one, the dig if the defender has one, or not at all. */
+export function availableSpends(pips: Record<Slot, number>): DefenceSpecial[] {
+	return ['none', ...(pips.blocker > 0 ? ['block' as const] : []), ...(pips.defender > 0 ? ['dig' as const] : [])];
+}
+
+/** Charges a first touch (pass or dig) earns: 1 for a great one (+1), 2 for a perfect one (+2). */
+export const firstTouchPips = (mod: number) => Math.max(0, mod);
+
+/** Charges a set earns: 1 for a great one, the top of the ladder. */
+export const setPips = (mod: number) => (mod >= 2 ? 1 : 0);
+
+/** A serve's pass: the die plus the passer's defense over 4 (and less in the seam), read off the same table. */
+export const servePass = (die: number, defense: number, seam: boolean) =>
+	firstTouch(Math.min(6, Math.max(1, die + defense - 4 + (seam ? config.seamPassMod : 0))));
 
 export const power = (attack: number, die: number, setMod: number) => attack + die + setMod;
 
@@ -58,7 +143,7 @@ export function defenderZone(stance: Stance, block: Channel): Zone {
 export function aimResult(shot: Shot, acc: number): AimResult {
 	if (acc <= config.accuracyEasy) return 'easy';
 	if (acc >= config.accuracyExact) return 'exact';
-	return shot !== 'tip' && acc <= config.accuracyIntoBlock ? 'block' : 'drift';
+	return !isSoft(shot) && acc <= config.accuracyIntoBlock ? 'block' : 'drift';
 }
 
 /**
@@ -82,8 +167,9 @@ export function landing(
 	return closest.length === 1 ? closest[0] : pickTie(closest);
 }
 
+/** A short defender reads a tip; a deep one reads a dig over, and the hard shot their blocker leaves open. */
 export const isRead = (shot: Shot, block: Channel, stance: Stance) =>
-	shot === 'tip' ? stance === 'short' : stance === 'deep' && shot !== block;
+	shot === 'tip' ? stance === 'short' : shot === 'over' ? stance === 'deep' : stance === 'deep' && shot !== block;
 
 export function blockResult(block: number, attack: number): BlockResult {
 	if (block - attack >= config.blockMargin) return 'stuff';
@@ -91,7 +177,15 @@ export function blockResult(block: number, attack: number): BlockResult {
 	return 'touch';
 }
 
-export const reach = (dist: number) => config.reach[Math.min(dist, config.reach.length - 1)];
+/**
+ * A dig over drops deep: a defender playing deep is there (full reach), one playing short has to turn
+ * and chase it (the longest reach), wherever exactly it lands.
+ */
+export const overReach = (stance: Stance) => (stance === 'deep' ? config.reach[0] : config.reach[config.reach.length - 1]);
+
+/** Pancake (run mode) gets to a ball one zone away better. */
+export const reach = (dist: number, digger?: Player) =>
+	dist === 1 && digger && has(digger, 'pancake') ? config.abilities.pancakeReach : config.reach[Math.min(dist, config.reach.length - 1)];
 
 export const digTotal = (defense: number, reach: number, die: number, read: boolean) =>
 	Math.floor(defense * reach) + die + (read ? config.readBonus : 0);

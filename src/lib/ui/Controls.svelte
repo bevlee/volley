@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { Channel, Shot, Stance } from '#lib/engine/types.ts';
+	import { config } from '#lib/engine/config.ts';
+	import type { AttackOption, BlockMode, Channel, DefenceSpecial, Shot, Stance } from '#lib/engine/types.ts';
 
 	let {
 		status,
@@ -8,8 +9,10 @@
 		defending,
 		defence = $bindable(),
 		ondefend,
-		shot,
-		onshot,
+		choices,
+		modes = null,
+		pick,
+		onpick,
 		onattack,
 		onpreview,
 		over,
@@ -19,7 +22,10 @@
 		onstep,
 		overLabel = 'New game',
 		overDisabled = false,
-		onnewgame
+		onnewgame,
+		charges = null,
+		special = $bindable(false),
+		spend = $bindable('none')
 	}: {
 		/** One line on whose call it is or what just happened. */
 		status: string;
@@ -29,12 +35,16 @@
 		choosing: boolean;
 		/** It's the other team's attack: show the block and dig choices. */
 		defending: boolean;
-		defence: { block: Channel; stance: Stance };
+		defence: { block: Channel; stance: Stance; blockMode: BlockMode };
 		ondefend: () => void;
-		/** The shot picked for the player's attack. */
-		shot: Shot;
-		/** Picks a shot; it doesn't hit it. */
-		onshot: (shot: Shot) => void;
+		/** The attacks the player can pick from, in key order (1, 2, 3…). */
+		choices: (AttackOption & { label: string })[];
+		/** How the blocker can play it, when block modes are in play; null hides the choice. */
+		modes?: BlockMode[] | null;
+		/** The attack picked for the player's attack. */
+		pick: AttackOption;
+		/** Picks an attack; it doesn't hit it. */
+		onpick: (pick: AttackOption) => void;
 		/** Hits the picked shot: the calls are revealed, then the attack rolls. */
 		onattack: () => void;
 		/** Hovering or focusing a shot previews it on the court; null when it stops. */
@@ -51,7 +61,15 @@
 		overLabel?: string;
 		overDisabled?: boolean;
 		onnewgame: () => void;
+		/** The ?specials prototype: the charges the hitter, blocker and digger have for this call; null when charges are off. */
+		charges?: { hitter: string; hitterPips: number; blocker: string; blockerPips: number; digger: string; diggerPips: number } | null;
+		/** The player's attack spends one of the hitter's charges. */
+		special?: boolean;
+		/** The player's defence spends one of the blocker's or digger's charges. */
+		spend?: DefenceSpecial;
 	} = $props();
+
+	const toggleSpend = (on: DefenceSpecial) => (spend = spend === on ? 'none' : on);
 
 	// The feed keeps the latest line in view.
 	let feedBox = $state<HTMLElement>();
@@ -64,10 +82,11 @@
 		action();
 	}
 
-	const SHOTS: { shot: Shot; label: string; key: string }[] = [
-		{ shot: 'line', label: 'Line', key: '1' },
-		{ shot: 'cross', label: 'Cross', key: '2' },
-		{ shot: 'tip', label: 'Tip', key: '3' }
+	const picked = (o: AttackOption) => o.shot === pick.shot && o.tempo === pick.tempo;
+	const MODES: { value: BlockMode; label: string; key: string }[] = [
+		{ value: 'commit', label: 'Commit', key: '7' },
+		{ value: 'read', label: 'Read', key: '8' },
+		{ value: 'none', label: 'No block', key: '9' }
 	];
 	const BLOCKS: { value: Channel; label: string; key: string }[] = [
 		{ value: 'line', label: 'Line', key: '1' },
@@ -96,20 +115,32 @@
 			<button class="primary" disabled={overDisabled} onclick={(e) => run(e, onnewgame)}>{overLabel}</button>
 		{:else if choosing}
 			<span class="group" role="group" aria-label="Shot">
-				{#each SHOTS as s (s.shot)}
+				{#each choices as c, i (`${c.tempo}-${c.shot}`)}
 					<button
-						class:on={shot === s.shot}
-						aria-pressed={shot === s.shot}
-						onclick={(e) => run(e, () => onshot(s.shot))}
-						onmouseenter={() => onpreview(s.shot)}
+						class:on={picked(c)}
+						aria-pressed={picked(c)}
+						onclick={(e) => run(e, () => onpick(c))}
+						onmouseenter={() => onpreview(c.shot)}
 						onmouseleave={() => onpreview(null)}
-						onfocus={() => onpreview(s.shot)}
+						onfocus={() => onpreview(c.shot)}
 						onblur={() => onpreview(null)}
 					>
-						{s.label} <kbd>{s.key}</kbd>
+						{c.label} <kbd>{i + 1}</kbd>
 					</button>
 				{/each}
 			</span>
+			{#if charges}
+				<button
+					class="special"
+					class:on={special}
+					aria-pressed={special}
+					disabled={charges.hitterPips === 0}
+					title={charges.hitterPips ? `Spend one of ${charges.hitter}'s ${charges.hitterPips} charges` : `${charges.hitter} has no charges`}
+					onclick={(e) => run(e, () => (special = !special))}
+				>
+					★ Special <small>+{config.specialHitAccuracy} aim · +{config.specialHitPower} power</small> <kbd>S</kbd>
+				</button>
+			{/if}
 			<button class="primary" onclick={(e) => run(e, onattack)}>Attack! <kbd>Space</kbd></button>
 		{:else if defending}
 			<span class="group" role="group" aria-label="Block">
@@ -128,6 +159,40 @@
 					</button>
 				{/each}
 			</span>
+			{#if modes}
+				<span class="group" role="group" aria-label="Block mode">
+					{#each MODES.filter((m) => modes.includes(m.value)) as m (m.value)}
+						<button class:on={defence.blockMode === m.value} aria-pressed={defence.blockMode === m.value} onclick={(e) => run(e, () => (defence.blockMode = m.value))}>
+							{m.label} <kbd>{m.key}</kbd>
+						</button>
+					{/each}
+				</span>
+			{/if}
+			{#if charges}
+				<span class="group" role="group" aria-label="Special">
+					<span class="group-label">★</span>
+					<button
+						class="special"
+						class:on={spend === 'block'}
+						aria-pressed={spend === 'block'}
+						disabled={charges.blockerPips === 0}
+						title={charges.blockerPips ? `Spend one of ${charges.blocker}'s ${charges.blockerPips} charges` : `${charges.blocker} has no charges`}
+						onclick={(e) => run(e, () => toggleSpend('block'))}
+					>
+						Block +{config.specialBlock} <kbd>5</kbd>
+					</button>
+					<button
+						class="special"
+						class:on={spend === 'dig'}
+						aria-pressed={spend === 'dig'}
+						disabled={charges.diggerPips === 0}
+						title={charges.diggerPips ? `Spend one of ${charges.digger}'s ${charges.diggerPips} charges` : `${charges.digger} has no charges`}
+						onclick={(e) => run(e, () => toggleSpend('dig'))}
+					>
+						Dig +{config.specialDig} <kbd>6</kbd>
+					</button>
+				</span>
+			{/if}
 			<button class="primary" onclick={(e) => run(e, ondefend)}>Lock in <kbd>Space</kbd></button>
 		{:else}
 			<button class="primary wide" disabled={busy || stepDisabled} onclick={(e) => run(e, onstep)} title="Space or → also steps">
@@ -136,9 +201,16 @@
 		{/if}
 	</div>
 	{#if choosing}
-		<p class="hint">Pick a shot, then Space to hit it. A hard shot gets stuffed if they block it. A tip gets dug if their defender creeps short.</p>
+		<p class="hint">
+			Pick a shot, then Space to hit it. A hard shot gets stuffed if they block it. A tip gets dug if their defender creeps short.
+			{#if charges}<span class="star">★</span> Great touches earn charges; a special spends one of {charges.hitter}'s.{/if}
+		</p>
 	{:else if defending}
-		<p class="hint"><span class="bad">Red</span> is covered, <span class="ok">green</span> is open.</p>
+		<p class="hint">
+			<span class="bad">Red</span> is covered, <span class="ok">green</span> is open.
+			{#if modes}Commit takes the channel; read starts there and may get across, but late; no block helps the dig.{/if}
+			{#if charges}<span class="star">★</span> A special is spent when you lock in, even if they hit somewhere else.{/if}
+		</p>
 	{/if}
 </section>
 
@@ -218,8 +290,14 @@
 	}
 	.group {
 		display: inline-flex;
+		flex-wrap: wrap;
+		justify-content: center;
 		align-items: center;
 		gap: 4px;
+	}
+	/* With more choices than fit (run mode's attacks), the row wraps rather than squashing the labels. */
+	.group button {
+		white-space: nowrap;
 	}
 	.group-label {
 		font-size: 0.8rem;
@@ -229,6 +307,28 @@
 		background: var(--block);
 		border-color: var(--block);
 		color: var(--bg);
+		font-weight: 700;
+	}
+	.special {
+		border-color: var(--special);
+		color: var(--special);
+		font-weight: 700;
+	}
+	.special small {
+		font-weight: 500;
+		opacity: 0.85;
+	}
+	.special.on {
+		background: var(--special);
+		border-color: var(--special);
+		color: var(--bg);
+	}
+	.special:disabled {
+		opacity: 0.35;
+		cursor: default;
+	}
+	.star {
+		color: var(--special);
 		font-weight: 700;
 	}
 	kbd {

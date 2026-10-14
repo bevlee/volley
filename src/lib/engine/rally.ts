@@ -83,13 +83,32 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 	const log = (text: string, tag?: string, data?: LogEntry['data']) =>
 		g.log.push({ rally: g.rally, text, tag, data });
 	const phase = g.phase;
+	/** Adds a player's special charges for their great or perfect touch, up to the cap. */
+	const charge = (team: TeamId, slot: Slot, pips: number, touch: string) => {
+		if (!config.specials || pips === 0) return;
+		g.pips ??= { A: { blocker: 0, defender: 0 }, B: { blocker: 0, defender: 0 } };
+		const player = g.teams[team][slot].name;
+		const before = g.pips[team][slot];
+		const after = Math.min(config.maxPips, before + pips);
+		g.pips[team][slot] = after;
+		log(`${touch} by ${player} · charges ${after}/${config.maxPips}`, 'pips', {
+			team,
+			slot,
+			player,
+			gained: after - before,
+			wasted: before + pips - after,
+			pips: after
+		});
+	};
 	const set = () => {
 		const a = g.attack!;
 		const setter = g.teams[a.team][partner(a.hitter)];
 		const die = roll(a.team, partner(a.hitter), 'set');
 		a.setDie = die;
-		a.setMod = rules.ladder(die + a.firstMod);
-		log(`${setter.name} sets · d6 ${die}${plus(a.firstMod)} → ${signed(a.setMod)}`, 'set', {
+		// Setter's touch: no bad set rolls (the natural die still counts for a hitting error).
+		const setRoll = rules.has(setter, 'settersTouch') ? Math.max(die, config.abilities.settersTouchMin) : die;
+		a.setMod = rules.ladder(setRoll + a.firstMod);
+		log(`${setter.name} sets · d6 ${die}${setRoll !== die ? ` (as ${setRoll})` : ''}${plus(a.firstMod)} → ${signed(a.setMod)}`, 'set', {
 			team: a.team,
 			player: setter.name,
 			die,
@@ -97,6 +116,7 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			source: a.source
 		});
 		if (rules.isShank(a.firstDie, die)) return scorePoint(g, other(a.team), 'shank', 'two natural 1s');
+		charge(a.team, partner(a.hitter), rules.setPips(a.setMod), 'Great set');
 		g.phase = { kind: 'calls' };
 	};
 
@@ -114,22 +134,45 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			// No serve roll yet: the serve always comes over for the other side to pass.
 			const server = g.teams[phase.team][g.servers[phase.team]].name;
 			const receiving = other(phase.team);
-			log(`${server} serves to ${receiving}`, 'serve', { team: phase.team, player: server, receiving });
-			g.phase = { kind: 'freeBall', team: receiving };
+			if (!config.serveTargets) {
+				log(`${server} serves to ${receiving}`, 'serve', { team: phase.team, player: server, receiving });
+				g.phase = { kind: 'freeBall', team: receiving };
+				return;
+			}
+			const target = (choosers.serve ?? randomChoosers.serve!)(g, phase.team, rng);
+			const seam = target === 'seam';
+			// Into the seam, either receiver might end up with it.
+			const receiver = seam ? pick(rng, ['blocker', 'defender'] as const) : target;
+			const passer = g.teams[receiving][receiver].name;
+			log(`${server} serves ${seam ? `the seam, ${passer} takes it` : `at ${passer}`}`, 'serve', {
+				team: phase.team,
+				player: server,
+				receiving,
+				target,
+				receiver
+			});
+			g.phase = { kind: 'freeBall', team: receiving, receiver, seam };
 			return;
 		}
 
 		case 'freeBall': {
-			const slot = config.freeBallReceiver;
+			const slot = phase.receiver ?? config.freeBallReceiver;
 			const die = roll(phase.team, slot, 'pass');
-			g.attack = { team: phase.team, hitter: slot, source: 'free', firstDie: die, firstMod: rules.firstTouch(die) };
 			const passer = g.teams[phase.team][slot].name;
+			// Steady passer reads the pass roll higher (the natural die still counts for a hitting error).
+			const steady = rules.has(g.teams[phase.team][slot], 'steadyPasser') ? config.abilities.steadyPass : 0;
+			const passDie = Math.min(6, die + steady);
+			const firstMod = phase.receiver
+				? rules.servePass(passDie, g.teams[phase.team][slot].defense, phase.seam ?? false)
+				: rules.firstTouch(passDie);
+			g.attack = { team: phase.team, hitter: slot, source: 'free', firstDie: die, firstMod };
 			log(`${passer} passes · d6 ${die} → ${signed(g.attack.firstMod)}`, 'pass', {
 				team: phase.team,
 				player: passer,
 				die,
 				mod: g.attack.firstMod
 			});
+			charge(phase.team, slot, rules.firstTouchPips(firstMod), `${firstMod >= 2 ? 'Perfect' : 'Great'} pass`);
 			g.phase = { kind: 'set' };
 			return;
 		}
@@ -146,6 +189,8 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				firstDie: die,
 				firstMod: rules.firstTouch(die)
 			};
+			const mod = g.attack.firstMod;
+			charge(g.attack.team, 'defender', rules.firstTouchPips(mod), `${mod >= 2 ? 'Perfect' : 'Great'} dig`);
 			return set();
 		}
 
@@ -176,8 +221,34 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				block: choosers.block(g, defending, rng),
 				stance: choosers.stance(g, defending, rng)
 			};
+			if (config.blockModes) {
+				a.calls.tempo = (choosers.tempo ?? randomChoosers.tempo!)(g, a.team, rng);
+				a.calls.blockMode = (choosers.blockMode ?? randomChoosers.blockMode!)(g, defending, rng);
+			}
+			// The hitter can spend one of their charges on the hit, and the blocker or digger one of theirs.
+			// It's gone once called, whether or not it comes into play.
+			if (config.specials && g.pips) {
+				const mine = g.pips[a.team];
+				if (mine[a.hitter] > 0 && (choosers.special ?? randomChoosers.special!)(g, a.team, rng)) {
+					a.calls.special = true;
+					mine[a.hitter]--;
+				}
+				const theirs = g.pips[defending];
+				const open = rules.availableSpends(theirs);
+				const spend = open.length > 1 ? (choosers.defenceSpecial ?? randomChoosers.defenceSpecial!)(g, defending, rng) : 'none';
+				if (!open.includes(spend)) throw new Error(`${defending} has no charge to spend on the ${spend}`);
+				if (spend !== 'none') {
+					a.calls.defenceSpecial = spend;
+					theirs[spend === 'block' ? 'blocker' : 'defender']--;
+				}
+			}
+			const open = rules.attackOptionsIn(g);
+			if (!open.some((o) => o.shot === a.calls!.shot && (!o.tempo || !a.calls!.tempo || o.tempo === a.calls!.tempo)))
+				throw new Error(`${a.calls.tempo ? `${a.calls.tempo} ` : ''}${a.calls.shot} isn't on off a ${signed(a.setMod!)} set`);
+			if (a.calls.blockMode && !rules.blockModesFor(g.teams[defending].blocker).includes(a.calls.blockMode))
+				throw new Error(`${g.teams[defending].blocker.name} can't ${a.calls.blockMode}`);
 			log(
-				`Calls · ${a.team} ${a.calls.shot} · ${defending} blocks ${a.calls.block}, defender ${a.calls.stance}`,
+				`Calls · ${a.team} ${a.calls.shot}${a.calls.special ? ' (special)' : ''} · ${defending} blocks ${a.calls.block}, defender ${a.calls.stance}${a.calls.defenceSpecial ? ` (special ${a.calls.defenceSpecial})` : ''}`,
 				'calls',
 				{
 					...a.calls,
@@ -202,18 +273,27 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 
 			const powerDie = roll(a.team, a.hitter, 'power');
 			a.powerDie = powerDie;
-			if (rules.isShank(a.setDie!, powerDie)) {
+			// A dig over isn't a swing: no hitting error and no unstoppable hit.
+			const over = calls.shot === 'over';
+			if (!over && rules.isShank(a.setDie!, powerDie)) {
 				log(`${hitter.name} swings · d6 1`, 'swing', { player: hitter.name, team: a.team, slot: a.hitter, shot: calls.shot, die: 1 });
 				return scorePoint(g, other(a.team), 'shank', 'two natural 1s');
 			}
-			if (rules.isGuaranteedKill(a.setDie!, powerDie)) {
+			if (!over && rules.isGuaranteedKill(a.setDie!, powerDie)) {
 				log(`${hitter.name} swings · d6 6`, 'swing', { player: hitter.name, team: a.team, slot: a.hitter, shot: calls.shot, die: 6 });
 				// No aim roll: an unstoppable hit lands where it was called.
 				a.landing = rules.TARGET[calls.shot];
 				return scorePoint(g, a.team, 'guaranteed kill', '6 on the set, 6 on the hit');
 			}
 
-			const power = rules.power(hitter.attack, powerDie, setMod);
+			const special = calls.special ? config.specialHitPower : 0;
+			const hard = !rules.isSoft(calls.shot);
+			const heavy = hard && rules.has(hitter, 'heavyHitter');
+			const lineBoost =
+				(calls.shot === 'line' && rules.has(hitter, 'lineSpecialist') ? config.abilities.lineSpecialistPower : 0) +
+				(calls.tempo === 'fast' && rules.has(hitter, 'quick') ? config.abilities.quickPower : 0);
+			const power =
+				rules.power(hitter.attack, powerDie, setMod) + special + (heavy ? config.abilities.heavyHitterPower : 0) + lineBoost;
 			const hitData = () => ({
 				team: a.team,
 				slot: a.hitter,
@@ -221,8 +301,11 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				shot: calls.shot,
 				attack: a.incoming!
 			});
-			const powerText = `${hitter.attack} + ${powerDie}${plus(setMod)} = ${power}`;
-			if (calls.shot === 'tip') {
+			const powerText = `${hitter.attack} + ${powerDie}${plus(setMod)}${special ? ` + ${special} special` : ''}${heavy ? ` + ${config.abilities.heavyHitterPower} heavy` : ''}${lineBoost ? ` + ${lineBoost} ability` : ''} = ${power}`;
+			if (over) {
+				a.incoming = config.overPower + powerDie;
+				log(`${hitter.name} digs it over deep · ${config.overPower} + ${powerDie} = ${a.incoming}`, 'hit', hitData());
+			} else if (calls.shot === 'tip') {
 				a.incoming = power;
 				log(`${hitter.name} tips · ${powerText}`, 'hit', hitData());
 			} else {
@@ -231,8 +314,13 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			}
 
 			const accDie = roll(a.team, a.hitter, 'aim');
-			a.accuracy = rules.accuracy(accDie, a.firstMod, setMod, setter.attack);
-			const accText = `Accuracy ${accDie}${plus(a.firstMod)}${plus(setMod)} + ${setter.attack} = ${a.accuracy}`;
+			// Quick: a hitter used to fast sets aims them better.
+			const tempoMod = calls.tempo === 'fast' ? (rules.has(hitter, 'quick') ? config.abilities.quickAim : config.fastAccuracyMod) : 0;
+			const specialAim = calls.special ? config.specialHitAccuracy : 0;
+			// Abilities: Heavy hitter aims worse.
+			const abilityAim = heavy ? config.abilities.heavyHitterAim : 0;
+			a.accuracy = rules.accuracy(accDie, a.firstMod, setMod, setter.attack) + tempoMod + specialAim + abilityAim;
+			const accText = `Accuracy ${accDie}${plus(a.firstMod)}${plus(setMod)} + ${setter.attack}${tempoMod ? `${plus(tempoMod)} fast` : ''}${specialAim ? ` + ${specialAim} special` : ''}${abilityAim ? `${plus(abilityAim)} ability` : ''} = ${a.accuracy}`;
 			const defenderAt = rules.defenderZone(calls.stance, calls.block);
 			const where = rules.landing(calls.shot, a.accuracy, defenderAt, (zones) => pick(rng, zones));
 			a.aim = rules.aimResult(calls.shot, a.accuracy);
@@ -252,32 +340,69 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const defending = other(a.team);
 			const { blocker, defender } = g.teams[defending];
 			// The block is in play when the shot went down the blocker's channel, or was aimed into the block.
+			// A reading blocker might also get across to the other channel, but late, with less over the net.
+			const mode = calls.blockMode ?? 'commit';
 			const intoBlock = a.aim === 'block' && calls.shot !== calls.block;
-			if (calls.shot !== 'tip' && (calls.shot === calls.block || intoBlock)) {
+			let blocking = mode !== 'none' && hard && (calls.shot === calls.block || intoBlock);
+			// A reading blocker tries to get across; so does a Read blocker who committed the wrong way.
+			const late = mode === 'read' || (mode === 'commit' && rules.has(blocker, 'readBlocker'));
+			let lateBlock = false;
+			if (late && hard && !blocking) {
+				const die = roll(defending, 'blocker', 'read');
+				blocking = lateBlock = die <= config.readChance[calls.tempo ?? 'high'];
+				log(`${blocker.name} reads ${calls.shot} · d6 ${die} → ${blocking ? 'gets across' : 'too late'}`, 'read', {
+					die,
+					across: blocking,
+					player: blocker.name,
+					team: defending
+				});
+			}
+			if (blocking) {
 				const die = roll(defending, 'blocker', 'block');
-				const total = blocker.defense + die + config.blockBonus;
+				// A block that got across late has less over the net. Wall commits harder.
+				const bonus =
+					(mode === 'read' || lateBlock ? config.readBlockBonus : config.blockBonus) +
+					(mode === 'commit' && rules.has(blocker, 'wall') ? config.abilities.wallBlock : 0) +
+					(calls.defenceSpecial === 'block' ? config.specialBlock : 0);
+				const total = blocker.defense + die + bonus;
 				const result = rules.blockResult(total, a.incoming!);
 				log(
-					`${blocker.name} blocks · ${blocker.defense} + ${die} + ${config.blockBonus} = ${total} vs ${a.incoming} → ${result}`,
+					`${blocker.name} blocks · ${blocker.defense} + ${die} + ${bonus} = ${total} vs ${a.incoming} → ${result}`,
 					'block',
-					{ result, total, attack: a.incoming!, player: blocker.name, team: defending, intoBlock }
+					{ result, total, attack: a.incoming!, player: blocker.name, team: defending, intoBlock, mode }
 				);
 				if (result === 'stuff') return scorePoint(g, defending, 'stuff', `block ${total} vs ${a.incoming}`);
 				if (result === 'touch') {
+					// Tool the block: the hitter goes off the hands and out.
+					if (rules.has(hitter, 'toolTheBlock')) {
+						const tool = roll(a.team, a.hitter, 'tool');
+						const out = tool >= config.abilities.toolTheBlockOn;
+						log(`${hitter.name} goes for the hands · d6 ${tool} → ${out ? 'off the block and out' : 'stays in'}`, 'tool', {
+							die: tool,
+							out,
+							player: hitter.name,
+							team: a.team
+						});
+						if (out) return scorePoint(g, a.team, 'kill', `off ${blocker.name}'s hands`);
+					}
 					a.blockDie = die;
 					g.phase = { kind: 'touched' };
 					return;
 				}
 			}
 
-			const reach = rules.reach(rules.distance(defenderAt, where));
+			const reach = calls.shot === 'over' ? rules.overReach(calls.stance) : rules.reach(rules.distance(defenderAt, where), defender);
 			const read = rules.isRead(calls.shot, calls.block, calls.stance);
 			const digDie = roll(defending, 'defender', 'dig');
 			let dig = rules.digTotal(defender.defense, reach, digDie, read);
+			if (mode === 'none') dig += config.noBlockDigBonus;
+			if (calls.defenceSpecial === 'dig') dig += config.specialDig;
+			const libero = rules.has(defender, 'liberoInstincts') ? config.abilities.liberoDig : 0;
+			dig += libero;
 			if (config.partnerPoolOnDig) dig += Math.floor((blocker.defense + roll(defending, 'blocker', 'pool')) / 2);
 			const up = dig >= a.incoming!;
 			log(
-				`${defender.name} digs · ${defender.defense} × ${reach} + ${digDie}${read ? ` + ${config.readBonus} read` : ''} = ${dig} vs ${a.incoming} → ${up ? `up, first touch ${signed(rules.firstTouch(digDie))}` : 'kill'}`,
+				`${defender.name} digs · ${defender.defense} × ${reach} + ${digDie}${read ? ` + ${config.readBonus} read` : ''}${mode === 'none' ? ` + ${config.noBlockDigBonus} help` : ''}${calls.defenceSpecial === 'dig' ? ` + ${config.specialDig} special` : ''}${libero ? ` + ${libero} libero` : ''} = ${dig} vs ${a.incoming} → ${up ? `up, first touch ${signed(rules.firstTouch(digDie))}` : 'kill'}`,
 				'dig',
 				{
 					shot: calls.shot,

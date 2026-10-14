@@ -33,6 +33,149 @@ const lastPoint = (g: Game) => g.log.filter((e) => e.tag === 'point').at(-1);
 const lineIntoBlock: Calls = { shot: 'line', block: 'line', stance: 'deep' };
 
 describe('rally', () => {
+	describe('with special charges', () => {
+		const specials = (check: () => void) => {
+			try {
+				config.specials = true;
+				check();
+			} finally {
+				config.specials = false;
+			}
+		};
+		const pipsLog = (g: Game) => g.log.filter((e) => e.tag === 'pips').map((e) => e.data);
+		const none = { blocker: 0, defender: 0 };
+
+		it("charges the player who made the touch: 2 for a perfect pass, 1 for a great set, up to 4", () => {
+			specials(() => {
+				// A1 passes 6 (+2, perfect): A1 has 2. A2 sets 6 (+2, great): A2 has 1.
+				const g = run(2, lineIntoBlock, [6, 6]);
+				expect(g.pips).toEqual({ A: { blocker: 2, defender: 1 }, B: none });
+				expect(pipsLog(g)).toEqual([
+					{ team: 'A', slot: 'blocker', player: 'A1', gained: 2, wasted: 0, pips: 2 },
+					{ team: 'A', slot: 'defender', player: 'A2', gained: 1, wasted: 0, pips: 1 }
+				]);
+				// Two more perfect passes by A1: 4, then 4 with 2 wasted.
+				g.phase = { kind: 'freeBall', team: 'A' };
+				const twice = run(1, lineIntoBlock, [6], g);
+				twice.phase = { kind: 'freeBall', team: 'A' };
+				const capped = run(1, lineIntoBlock, [6], twice);
+				expect(capped.pips!.A.blocker).toBe(4);
+				expect(pipsLog(capped).at(-1)).toMatchObject({ slot: 'blocker', gained: 0, wasted: 2, pips: 4 });
+			});
+		});
+
+		it("a special hit spends the hitter's charge and adds power and accuracy", () => {
+			specials(() => {
+				const g = evenGame();
+				g.pips = { A: { blocker: 1, defender: 3 }, B: none };
+				// A1 passes and hits. Pass 4, set 4 (±0), power 3: 4 + 3 + 2 special = 9, plus the setter's 4 = 13.
+				// Aim 2 + 4 + 2 special = 8. A2's charges are untouched.
+				const calls: Calls = { shot: 'cross', block: 'line', stance: 'short', special: true };
+				const hit = run(4, calls, [4, 4, 3, 2, 1], g);
+				expect(hit.pips!.A).toEqual({ blocker: 0, defender: 3 });
+				expect(hit.attack!.incoming).toBe(13);
+				expect(hit.attack!.accuracy).toBe(8);
+			});
+		});
+
+		it("a dig special spends the digger's charge and adds 4, even when the shot goes elsewhere", () => {
+			specials(() => {
+				const g = evenGame();
+				g.pips = { A: none, B: { blocker: 2, defender: 2 } };
+				// Cross lands on target in 5; the short defender in 3 is two away: 4 × 0.25 + 6 + 4 special = 11.
+				const calls: Calls = { shot: 'cross', block: 'line', stance: 'short', defenceSpecial: 'dig' };
+				const dug = run(4, calls, [4, 4, 3, 4, 6], g);
+				expect(dug.pips!.B).toEqual({ blocker: 2, defender: 1 });
+				expect(dug.log.filter((e) => e.tag === 'dig').at(-1)?.data).toMatchObject({ total: 11 });
+			});
+		});
+
+		it("won't spend a charge the player doesn't have", () => {
+			specials(() => {
+				const g = evenGame();
+				g.pips = { A: none, B: { blocker: 0, defender: 1 } };
+				const calls: Calls = { shot: 'cross', block: 'line', stance: 'short', defenceSpecial: 'block' };
+				expect(() => run(3, calls, [4, 4], g)).toThrow('B has no charge to spend on the block');
+			});
+		});
+	});
+
+	describe('with set tempos and block modes', () => {
+		const modes = (check: () => void) => {
+			try {
+				config.blockModes = true;
+				check();
+			} finally {
+				config.blockModes = false;
+			}
+		};
+		// Pass 4 and set 4 (±0), power 3 (line hits 11 with the setter's share), aim 4 (8: on target).
+		const build = [4, 4, 3, 4];
+		const entry = (g: Game, tag: string) => g.log.filter((e) => e.tag === tag).at(-1)?.data;
+
+		it('a reading blocker gets across to the other channel off a high set, late', () => {
+			modes(() => {
+				const calls: Calls = { shot: 'line', block: 'cross', stance: 'deep', tempo: 'high', blockMode: 'read' };
+				// Read 5 (high sets: 5 or less gets across), block 5: 4 + 5 + 2 = 11 vs 11, a touch.
+				const g = run(4, calls, [...build, 5, 5]);
+				expect(entry(g, 'read')).toMatchObject({ across: true });
+				expect(entry(g, 'block')).toMatchObject({ total: 11, mode: 'read', result: 'touch' });
+			});
+		});
+
+		it("a fast set beats the read, but it's harder to aim", () => {
+			modes(() => {
+				const calls: Calls = { shot: 'line', block: 'cross', stance: 'deep', tempo: 'fast', blockMode: 'read' };
+				// Read 3 is too slow for a fast set (2 or less); the aim of 4 + 4 drops to 6 and drifts.
+				const g = run(4, calls, [...build, 3, 6]);
+				expect(entry(g, 'read')).toMatchObject({ across: false });
+				expect(g.attack!.accuracy).toBe(6);
+				expect(g.log.some((e) => e.rally === g.rally && e.tag === 'block')).toBe(false);
+			});
+		});
+
+		it('with no block, a shot down the called channel goes past, and the dig gets help', () => {
+			modes(() => {
+				const calls: Calls = { shot: 'line', block: 'line', stance: 'deep', tempo: 'high', blockMode: 'none' };
+				// The deep defender is across in 5, two zones from line's 1: 4 × 0.25 + dig 6 + 2 help = 9.
+				const g = run(4, calls, [...build, 6]);
+				expect(g.log.some((e) => e.rally === g.rally && e.tag === 'block')).toBe(false);
+				expect(entry(g, 'dig')).toMatchObject({ total: 9 });
+			});
+		});
+	});
+
+	it('aims serves when they are on: the passer is the one served, and their defense counts', () => {
+		const before = config.serveTargets;
+		try {
+			config.serveTargets = true;
+			const at = (serve: 'blocker' | 'defender' | 'seam') => ({ ...fixedChoosers(lineIntoBlock), serve: () => serve });
+			const g = newGame(5, NUMBERED);
+			g.teams.A.defender.defense = 6;
+			// Straight at A's defender: pass 3, plus 6 − 4 for their defense, reads as a 5: +1.
+			const served = step(step(g, at('defender'), scriptedDice([])), at('defender'), scriptedDice([3]));
+			expect(served.attack).toMatchObject({ team: 'A', hitter: 'defender', firstDie: 3, firstMod: 1 });
+			// Into the seam: a 5 picks the defender, and the pass of 6 reads as a 5 (−1): +1, not +2.
+			g.teams.A.defender.defense = 4;
+			const seam = step(step(g, at('seam'), scriptedDice([5])), at('seam'), scriptedDice([6]));
+			expect(seam.attack).toMatchObject({ hitter: 'defender', firstDie: 6, firstMod: 1 });
+		} finally {
+			config.serveTargets = before;
+		}
+	});
+
+	it("won't hit a shot the set doesn't leave on", () => {
+		const before = config.minSet;
+		try {
+			config.minSet = { line: 0, cross: null, tip: null };
+			// Pass 3 (±0), set 1: a −3 set, too poor for line.
+			expect(() => run(3, lineIntoBlock, [3, 1])).toThrow("line isn't on off a −3 set");
+			expect(run(3, { ...lineIntoBlock, shot: 'cross' }, [3, 1]).phase).toEqual({ kind: 'hit' });
+		} finally {
+			config.minSet = before;
+		}
+	});
+
 	it('starts with B2 holding the serve, then serving it to A without rolling', () => {
 		const g = newGame(5, NUMBERED);
 		expect(g.phase).toEqual({ kind: 'serve', team: 'B' });
