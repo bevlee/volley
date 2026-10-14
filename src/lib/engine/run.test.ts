@@ -82,23 +82,33 @@ describe('a run match', () => {
 
 	const highCross: Calls = { shot: 'cross', tempo: 'high', block: 'line', stance: 'deep', blockMode: 'commit' };
 
-	it("reads a Setter's touch set roll of 1 or 2 as 3", () => {
+	it("reads a Setter's touch set roll of 4 or 5 one higher", () => {
 		const touch = first();
 		touch.teams.A.defender.abilities = ['settersTouch'];
-		// Pass 4 (±0), set 2 reads as 3: −1 instead of −2.
-		expect(play(touch, 3, highCross, [4, 2]).attack!.setMod).toBe(-1);
-		// A natural 5 is untouched: ±0.
-		expect(play(touch, 3, highCross, [4, 5]).attack!.setMod).toBe(0);
+		// Pass 4 (±0), set 5 reads as 6: great (+2) instead of good (±0).
+		expect(play(touch, 3, highCross, [4, 5]).attack!.setMod).toBe(2);
+		// Pass 5 (+1), set 4 reads as 5: 5 + 1 = 6, great.
+		expect(play(touch, 3, highCross, [5, 4]).attack!.setMod).toBe(2);
+		// Other rolls are untouched: a 3 is −1.
+		expect(play(touch, 3, highCross, [4, 3]).attack!.setMod).toBe(-1);
 	});
 
-	it('gives a Read blocker a late read when the hit goes the other way from the committed block', () => {
+	it("plays a Soft block's touches up to the setter: +1 as a first touch instead of −1", () => {
 		const g = first();
-		g.teams.B.blocker.abilities = ['readBlocker'];
-		// Kenma commits to line; Hinata hits high cross. Read 5 (high sets: 5 or less): across, late (+2).
-		// Hinata 6 + 3 = 9, plus (2 + 4) ÷ 2 = 12; Kenma 3 + 6 + 2 = 11: a touch.
-		const read = play(g, 5, highCross, [...build, 3, 6, 5, 6]);
-		expect(entry(read, 'read')).toMatchObject({ across: true });
-		expect(entry(read, 'block')).toMatchObject({ total: 11, result: 'touch' });
+		g.teams.B.blocker.abilities = ['softBlock'];
+		// Hinata's line (12) into Kenma's line block: 3 + 6 + 3 = 12, a touch. Nekoma's attack starts at +1.
+		const lineIntoBlock: Calls = { ...highCross, shot: 'line' };
+		const touched = play(g, 6, lineIntoBlock, [...build, 3, 6, 6, 4]);
+		expect(touched.attack).toMatchObject({ team: 'B', source: 'touch', firstMod: 1 });
+	});
+
+	it("makes a Libero instincts dig one grade better as a first touch", () => {
+		const g = first();
+		g.teams.B.defender.abilities = ['liberoInstincts'];
+		// Hinata's high cross goes around Kenma's line block; Yaku, deep, digs it with a 4 (normally ±0),
+		// which reads as a 5: +1. Then Kenma sets (3).
+		const dug = play(g, 6, highCross, [...build, 3, 6, 4, 3]);
+		expect(dug.attack).toMatchObject({ team: 'B', source: 'dig', firstDie: 4, firstMod: 1 });
 	});
 
 	it("adds 1 to a Steady passer's pass roll", () => {

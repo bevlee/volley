@@ -105,8 +105,8 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 		const setter = g.teams[a.team][partner(a.hitter)];
 		const die = roll(a.team, partner(a.hitter), 'set');
 		a.setDie = die;
-		// Setter's touch: no bad set rolls (the natural die still counts for a hitting error).
-		const setRoll = rules.has(setter, 'settersTouch') ? Math.max(die, config.abilities.settersTouchMin) : die;
+		// Setter's touch: more great sets (the natural die still counts for a hitting error).
+		const setRoll = rules.has(setter, 'settersTouch') && die >= config.abilities.settersTouchFrom && die < 6 ? die + 1 : die;
 		a.setMod = rules.ladder(setRoll + a.firstMod);
 		log(`${setter.name} sets · d6 ${die}${setRoll !== die ? ` (as ${setRoll})` : ''}${plus(a.firstMod)} → ${signed(a.setMod)}`, 'set', {
 			team: a.team,
@@ -187,7 +187,10 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				source: 'dig',
 				dugAt: rules.defenderZone(dug.calls!.stance, dug.calls!.block),
 				firstDie: die,
-				firstMod: rules.firstTouch(die)
+				// Libero instincts: a dig that comes up sets up a better attack.
+				firstMod: rules.firstTouch(
+					Math.min(6, die + (rules.has(g.teams[other(dug.team)].defender, 'liberoInstincts') ? config.abilities.liberoTouch : 0))
+				)
 			};
 			const mod = g.attack.firstMod;
 			charge(g.attack.team, 'defender', rules.firstTouchPips(mod), `${mod >= 2 ? 'Perfect' : 'Great'} dig`);
@@ -200,12 +203,14 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			// die counts as the first touch's die for the two-1s shank rule.
 			const blocked = g.attack!;
 			const die = blocked.blockDie!;
+			// Soft block: a blocker who plays the touch up to their setter.
+			const soft = rules.has(g.teams[other(blocked.team)].blocker, 'softBlock');
 			g.attack = {
 				team: other(blocked.team),
 				hitter: 'blocker',
 				source: 'touch',
 				firstDie: die,
-				firstMod: config.touchFirstMod
+				firstMod: soft ? config.abilities.softBlockTouch : config.touchFirstMod
 			};
 			return set();
 		}
@@ -344,12 +349,9 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const mode = calls.blockMode ?? 'commit';
 			const intoBlock = a.aim === 'block' && calls.shot !== calls.block;
 			let blocking = mode !== 'none' && hard && (calls.shot === calls.block || intoBlock);
-			// A reading blocker tries to get across; so does a Read blocker who committed the wrong way.
-			const late = mode === 'read' || (mode === 'commit' && rules.has(blocker, 'readBlocker'));
-			let lateBlock = false;
-			if (late && hard && !blocking) {
+			if (mode === 'read' && hard && !blocking) {
 				const die = roll(defending, 'blocker', 'read');
-				blocking = lateBlock = die <= config.readChance[calls.tempo ?? 'high'];
+				blocking = die <= config.readChance[calls.tempo ?? 'high'];
 				log(`${blocker.name} reads ${calls.shot} · d6 ${die} → ${blocking ? 'gets across' : 'too late'}`, 'read', {
 					die,
 					across: blocking,
@@ -359,9 +361,9 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			}
 			if (blocking) {
 				const die = roll(defending, 'blocker', 'block');
-				// A block that got across late has less over the net. Wall commits harder.
+				// A read block is late, with less over the net. Wall commits harder.
 				const bonus =
-					(mode === 'read' || lateBlock ? config.readBlockBonus : config.blockBonus) +
+					(mode === 'read' ? config.readBlockBonus : config.blockBonus) +
 					(mode === 'commit' && rules.has(blocker, 'wall') ? config.abilities.wallBlock : 0) +
 					(calls.defenceSpecial === 'block' ? config.specialBlock : 0);
 				const total = blocker.defense + die + bonus;

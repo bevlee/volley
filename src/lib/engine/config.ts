@@ -78,14 +78,17 @@ export const config = {
 		heavyHitterAim: -1,
 		/** Tool the block: a block touch goes off the hands for a point on a d6 this high or higher. */
 		toolTheBlockOn: 5,
-		/** Libero instincts: better digs. */
+		/** Libero instincts: better digs, and a dig that comes up reads this much better as a first touch. */
 		liberoDig: 2,
+		liberoTouch: 1,
 		wallBlock: 1,
+		/** Soft block: this blocker's block touches count this much as a first touch (everyone else's: `touchFirstMod`). */
+		softBlockTouch: 1,
 		/** Pancake: reach for a ball one zone away. */
 		pancakeReach: 1,
 		/** Steady passer: added to this player's pass rolls. */
 		steadyPass: 1,
-		/** Setter's touch: this player's set rolls are never lower than this. */
-		settersTouchMin: 3
+		/** Setter's touch: this player's set rolls of this or more (short of a 6) count one higher. */
+		settersTouchFrom: 4
 	}
 };

@@ -29,7 +29,7 @@ export type AbilityId =
 	| 'heavyHitter'
 	| 'toolTheBlock'
 	| 'liberoInstincts'
-	| 'readBlocker'
+	| 'softBlock'
 	| 'wall'
 	| 'pancake'
 	| 'steadyPasser'

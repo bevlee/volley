@@ -41,18 +41,21 @@ After each win you're offered two, drawn at random from the ones still open (an 
 
 An ability works whenever its player is in that role: an attacking ability when they hit, a setting one when they set, a blocking one when they block, a digging one when they dig. In beach the passer hits and the partner sets, so roles change every rally.
 
-| Ability | Role | Effect |
-|---|---|---|
-| Tip | Hit | Can tip. |
-| Quick | Hit | Can hit quick sets (line or cross) off a set of ±0 or better. Fast sets are harder to aim (−2) and hard to read. |
-| Scrappy quick (needs Quick) | Hit | Quick sets off sets down to −2, with another −2 to aim when the set is below ±0. |
-| Line specialist | Hit | Line off sets down to −1. |
-| Heavy hitter | Hit | +1 power, −1 aim. |
-| Tool the block | Hit | When the block only touches the ball, a 5 or 6 knocks it off the hands and out: point. |
-| Libero instincts | Dig, set | +2 to digs, but this player's sets are never better than ±0 (they don't get back to the net in time). |
-| Read blocker | Block | A read block against a high set gets the full commit bonus. |
-| Wall | Block | +1 to committed blocks; can't read. |
-| Pancake | Dig | A ball one zone away is dug at ¾ reach instead of ½. |
+Each is sized with `npm run sim:abilities` to be worth roughly 2 to 4 points in 100 to the player it suits (the pick card says who). None needs another, and none takes an option away: costs are numbers, not lost choices. Earlier versions with restrictions (a Wall that couldn't read, a Libero whose sets were capped, a Scrappy quick that needed Quick) measured as worthless or worse.
+
+| Ability | Role | Suits | Effect |
+|---|---|---|---|
+| Tip | Hit | Hinata | Can tip. |
+| Quick | Hit | Hinata | Quick sets (line or cross) off ±0 or better, +1 power and no aim penalty. |
+| Line specialist | Hit | Hinata | Line off a set one worse, +1 power on line. |
+| Heavy hitter | Hit | Hinata | +1 power, −1 aim. |
+| Tool the block | Hit | Hinata | A block touch goes off the hands for a point on a 5 or 6. |
+| Wall | Block | Hinata | +1 to committed blocks. |
+| Soft block | Block | Hinata | Block touches count +1 as a first touch instead of −1. |
+| Steady passer | Pass | Hinata | +1 to pass rolls. |
+| Libero instincts | Dig | Nishinoya | +2 to digs, and a dig that comes up is one grade better as a first touch. |
+| Pancake | Dig | Nishinoya | Full reach for a ball one zone away. |
+| Setter's touch | Set | Nishinoya (or either) | Set rolls of 4 or 5 count one higher. |
 
 ## Dig over
 

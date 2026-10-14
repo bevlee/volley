@@ -60,12 +60,12 @@ export const ABILITIES: Record<AbilityId, Ability> = {
 		text: `When the block only gets a touch, a ${a.toolTheBlockOn} or more knocks it off the hands and out: point.`
 	},
 	wall: { id: 'wall', name: 'Wall', role: 'Blocking', suits: 'Hinata', text: `+${a.wallBlock} to committed blocks.` },
-	readBlocker: {
-		id: 'readBlocker',
-		name: 'Read blocker',
+	softBlock: {
+		id: 'softBlock',
+		name: 'Soft block',
 		role: 'Blocking',
 		suits: 'Hinata',
-		text: 'When the hitter goes the other way from a committed block, still gets a late read: a chance to get across with a smaller block.'
+		text: `Block touches go up to the setter: +${a.softBlockTouch} as a first touch instead of ${num(config.touchFirstMod)}.`
 	},
 	steadyPasser: {
 		id: 'steadyPasser',
@@ -79,7 +79,7 @@ export const ABILITIES: Record<AbilityId, Ability> = {
 		name: 'Libero instincts',
 		role: 'Digging',
 		suits: 'Nishinoya',
-		text: `+${a.liberoDig} to digs.`
+		text: `+${a.liberoDig} to digs, and a dig that comes up is one grade better as a first touch.`
 	},
 	pancake: {
 		id: 'pancake',
@@ -93,7 +93,7 @@ export const ABILITIES: Record<AbilityId, Ability> = {
 		name: "Setter's touch",
 		role: 'Setting',
 		suits: 'Nishinoya',
-		text: `Set rolls of ${a.settersTouchMin - 2} or ${a.settersTouchMin - 1} count as ${a.settersTouchMin}: no bad sets.`
+		text: `Set rolls of ${a.settersTouchFrom} or ${a.settersTouchFrom + 1} count one higher: more great sets.`
 	}
 };
 
@@ -116,8 +116,8 @@ const quickLine: AttackOption = { shot: 'line', tempo: 'fast' };
 
 /**
  * The five opponents, in order. Each attacks in every way the one before did, and one more. Stats
- * tuned with `npm run sim:run` for a balanced player winning about 100%, 88%, 78%, 69% and 53%: a run
- * won about a quarter of the time by perfect play.
+ * tuned with `npm run sim:run` for a balanced player winning about 100%, 92%, 76%, 56% and 49%: a run
+ * won about a fifth of the time by perfect play, less by a person.
  */
 export const OPPONENTS: Opponent[] = [
 	{
@@ -139,23 +139,23 @@ export const OPPONENTS: Opponent[] = [
 	{
 		team: 'Aoba Johsai',
 		blocker: { name: 'Iwaizumi', attack: 3, defense: 4 },
-		defender: { name: 'Oikawa', attack: 4, defense: 3 },
+		defender: { name: 'Oikawa', attack: 5, defense: 3 },
 		playbook: [over, highCross, highLine],
 		adds: 'High balls down the line too.',
 		lesson: 'Line or cross: now you have to guess, or read the high set.'
 	},
 	{
 		team: 'Inarizaki',
-		blocker: { name: 'Osamu', attack: 4, defense: 4 },
-		defender: { name: 'Atsumu', attack: 4, defense: 3 },
+		blocker: { name: 'Osamu', attack: 4, defense: 5 },
+		defender: { name: 'Atsumu', attack: 5, defense: 3 },
 		playbook: [over, highCross, highLine, quickCross],
 		adds: 'A quick set hit cross.',
 		lesson: 'Reading is too slow for a quick: commit, or leave it to the dig.'
 	},
 	{
 		team: 'Shiratorizawa',
-		blocker: { name: 'Tendou', attack: 3, defense: 5 },
-		defender: { name: 'Ushijima', attack: 5, defense: 3 },
+		blocker: { name: 'Tendou', attack: 4, defense: 6 },
+		defender: { name: 'Ushijima', attack: 6, defense: 3 },
 		playbook: [over, highCross, highLine, quickCross, quickLine],
 		adds: 'Quick sets down the line too: everything.',
 		lesson: 'All of it, against the strongest hitter in the run.'
