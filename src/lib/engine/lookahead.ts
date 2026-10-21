@@ -2,20 +2,22 @@ import { randomChoosers, SERVE_TARGETS, type Choosers } from './choosers';
 import { config } from './config';
 import { playRally } from './rally';
 import { mulberry32, type Rng } from './rng';
-import { attackOptionsIn, availableSpends, blockModesFor, blocksIn } from './rules';
-import type { BlockMode, Channel, DefenceSpecial, Game, ServeTarget, Shot, Stance, TeamId, Tempo } from './types';
+import { attackOptionsIn, availableSpends, blockModesFor, blocksIn, stancesIn } from './rules';
+import type { BlockMode, Channel, DefenceSpecial, Game, ServeTarget, Shot, Stance, TeamId, Tempo, Touch } from './types';
 
 /** The attacking side's half of a call. */
 export interface AttackCall {
 	shot: Shot;
 	tempo?: Tempo;
+	touch?: Touch;
 	special?: boolean;
 }
 
 /** The defending side's half of a call. */
 export interface DefenceCall {
 	block: Channel;
-	stance: Stance;
+	/** Left out when it makes no difference: against a quick ball. */
+	stance?: Stance;
 	blockMode?: BlockMode;
 	defenceSpecial?: DefenceSpecial;
 }
@@ -29,8 +31,6 @@ export interface Table {
 	defences: DefenceCall[];
 	payoffs: Payoffs;
 }
-
-const STANCES: readonly Stance[] = ['deep', 'short'];
 
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 const argmax = (xs: number[]) => xs.indexOf(Math.max(...xs));
@@ -64,7 +64,7 @@ export function equilibrium(m: Payoffs, rounds = 2000): { attack: number[]; defe
 
 /**
  * Every attack and defence call open at this set: the shots and blocks it leaves on, tempos and
- * block modes when they're in play, and spending a special charge when the hitter, blocker or
+ * block modes when they're in play, stances unless it's a quick ball, and spending a special charge when the hitter, blocker or
  * digger has one.
  */
 function options(game: Game): { attacks: AttackCall[]; defences: DefenceCall[] } {
@@ -76,9 +76,10 @@ function options(game: Game): { attacks: AttackCall[]; defences: DefenceCall[] }
 	const open = pips ? availableSpends(pips[rival]) : [];
 	const spends: (DefenceSpecial | undefined)[] = open.length > 1 ? open : [undefined];
 	// The hitter's options (in run mode, their abilities or their team's playbook), and the defence's.
-	const attacks = attackOptionsIn(game).flatMap(({ shot, tempo }) => specials.map((special) => ({ shot, tempo, special })));
+	const attacks = attackOptionsIn(game).flatMap(({ shot, tempo, touch }) => specials.map((special) => ({ shot, tempo, touch, special })));
+	const stances = stancesIn(game);
 	const defences = blocksIn(game).flatMap((block) =>
-		STANCES.flatMap((stance) =>
+		(stances.length ? stances : [undefined]).flatMap((stance) =>
 			modes.flatMap((blockMode) => spends.map((defenceSpecial) => ({ block, stance, blockMode, defenceSpecial })))
 		)
 	);
@@ -124,8 +125,9 @@ export function lookahead(rollouts = 100, pipValue = 0.08) {
 				const choosers: Choosers = {
 					shot: (g, t, r) => (thisCall(g) ? attack.shot : randomChoosers.shot(g, t, r)),
 					tempo: (g, t, r) => (thisCall(g) && attack.tempo) || randomChoosers.tempo!(g, t, r),
+					touch: (g, t, r) => (thisCall(g) && attack.touch) || randomChoosers.touch!(g, t, r),
 					block: (g, t, r) => (thisCall(g) ? defence.block : randomChoosers.block(g, t, r)),
-					stance: (g, t, r) => (thisCall(g) ? defence.stance : randomChoosers.stance(g, t, r)),
+					stance: (g, t, r) => (thisCall(g) && defence.stance) || randomChoosers.stance(g, t, r),
 					blockMode: (g, t, r) => (thisCall(g) && defence.blockMode) || randomChoosers.blockMode!(g, t, r),
 					special: (g, t, r) => (thisCall(g) ? (attack.special ?? false) : randomChoosers.special!(g, t, r)),
 					defenceSpecial: (g, t, r) =>
@@ -163,7 +165,7 @@ export function lookahead(rollouts = 100, pipValue = 0.08) {
 
 	/**
 	 * One side's call, picked whole by `pick` the first time any part of it is asked for, then handed
-	 * out part by part (shot, then tempo; or block, then stance and block mode).
+	 * out part by part (shot, then tempo or touch; or block, then stance and block mode).
 	 */
 	const calling = <T>(side: (t: Table) => T[], pick: (m: Payoffs, rng: Rng) => number) => {
 		let last: { game: Game; steps: number; call: T } | null = null;
@@ -181,8 +183,9 @@ export function lookahead(rollouts = 100, pipValue = 0.08) {
 		return {
 			shot: (game, _team, rng) => attack(game, rng).shot,
 			tempo: (game, team, rng) => attack(game, rng).tempo ?? randomChoosers.tempo!(game, team, rng),
+			touch: (game, team, rng) => attack(game, rng).touch ?? randomChoosers.touch!(game, team, rng),
 			block: (game, _team, rng) => defence(game, rng).block,
-			stance: (game, _team, rng) => defence(game, rng).stance,
+			stance: (game, team, rng) => defence(game, rng).stance ?? randomChoosers.stance(game, team, rng),
 			blockMode: (game, team, rng) => defence(game, rng).blockMode ?? randomChoosers.blockMode!(game, team, rng),
 			special: (game, _team, rng) => attack(game, rng).special ?? false,
 			defenceSpecial: (game, _team, rng) => defence(game, rng).defenceSpecial ?? 'none',
