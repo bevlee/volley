@@ -1,4 +1,4 @@
-import type { Shot, Slot, Tempo } from './types';
+import type { Channel, ReadOutcome, Shot, Slot, Tempo, Touch } from './types';
 
 export const config = {
 	/** Short games: first to 7, win by 2. */
@@ -35,6 +35,30 @@ export const config = {
 	 * stays down. Off for now: the sim tries it (npm run sim:blocks).
 	 */
 	blockModes: false,
+	/**
+	 * Advanced mode, tempo flow: the set decides the tempo, with no call. A set this good is a quick
+	 * ball (hard line or cross, and the defence calls only the block); anything worse is a high ball,
+	 * where the hitter places a shot: line or cross, hit hard, tipped or rolled. Normal games only, and
+	 * not with `blockModes`. Off for now: the sim tries it (npm run sim:tempo).
+	 */
+	advanced: false,
+	quickBallMinSet: 2,
+	/**
+	 * The worst set each high-ball shot can be hit off; null means it's always on. Tips stay on and
+	 * the worst set leaves at least three shots (rules.test checks both).
+	 */
+	highBallMinSet: {
+		line: { hard: null, tip: null, roll: null },
+		cross: { hard: null, tip: null, roll: null }
+	} as Record<Channel, Record<Touch, number | null>>,
+	/** The block's bonus on a quick ball down its channel, in place of `blockBonus`. */
+	quickBlockBonus: 3,
+	/** Advanced mode: the dig's reach and bonus by how the defender read the shot (a close read is `readBonus` − 2). */
+	tempoDig: {
+		read: { reach: 1, bonus: 3 },
+		close: { reach: 0.5, bonus: 1 },
+		wrong: { reach: 0.25, bonus: 0 }
+	} as Record<ReadOutcome, { reach: number; bonus: number }>,
 	/** A fast set is harder to aim. */
 	fastAccuracyMod: -2,
 	/** A reading blocker gets to a shot down the other channel on a d6 this high or lower. */

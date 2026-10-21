@@ -1,17 +1,47 @@
 import { config } from './config';
-import type { AbilityId, AimResult, AttackOption, BlockMode, BlockResult, Channel, DefenceSpecial, Game, Player, Shot, Slot, Stance, Team, TeamId, Tempo, Zone } from './types';
+import type { AbilityId, AimResult, AttackOption, BlockMode, BlockResult, Calls, Channel, DefenceSpecial, Game, Player, ReadOutcome, Shot, Slot, Stance, Team, TeamId, Tempo, Touch, Zone } from './types';
 
 export const ZONES: readonly Zone[] = [1, 2, 3, 4, 5, 6];
 /** The shots of a normal game. A dig over (`over`) is run mode only. */
 export const SHOTS: readonly Shot[] = ['line', 'cross', 'tip'];
 const CHANNELS: readonly Channel[] = ['line', 'cross'];
+export const TOUCHES: readonly Touch[] = ['hard', 'tip', 'roll'];
+export const STANCES: readonly Stance[] = ['deep', 'short'];
 const TEMPOS: readonly Tempo[] = ['fast', 'high'];
 const BLOCK_MODES: readonly BlockMode[] = ['commit', 'read', 'none'];
 
 export const has = (player: Player, ability: AbilityId) => player.abilities?.includes(ability) ?? false;
 
-/** A soft shot goes over the block rather than through it: a tip, or a dig over. */
-export const isSoft = (shot: Shot) => shot === 'tip' || shot === 'over';
+/** A soft shot goes over the block rather than through it: a tip, a roll, or a dig over. */
+export const isSoft = (shot: Shot | Touch) => shot === 'tip' || shot === 'roll' || shot === 'over';
+
+/** Advanced mode is on for this team's attacks: a normal game's team (run mode keeps its own attacks). */
+export function advancedFor(team: Team): boolean {
+	if (!config.advanced || team.runKit || team.playbook) return false;
+	if (config.blockModes) throw new Error('advanced mode sets its own tempo: turn off block modes');
+	return true;
+}
+
+/** Advanced mode: a great set is a quick ball, anything worse a high ball. */
+export const tempoOf = (setMod: number): Tempo => (setMod >= config.quickBallMinSet ? 'fast' : 'high');
+
+/** The tempo the set left the side attacking now, in advanced mode. */
+export function tempoIn(g: Game): Tempo | undefined {
+	const a = g.attack!;
+	return advancedFor(g.teams[a.team]) ? tempoOf(a.setMod!) : undefined;
+}
+
+/** The defender's options: none against a quick ball, which leaves them no time to move. */
+export const stancesIn = (g: Game): Stance[] => (tempoIn(g) === 'fast' ? [] : [...STANCES]);
+
+/** Advanced mode: the attacks off a set this good. A quick ball is hit hard; a high ball is any shot the set leaves on. */
+function advancedOptions(setMod: number): AttackOption[] {
+	const tempo = tempoOf(setMod);
+	if (tempo === 'fast') return CHANNELS.map((shot) => ({ shot, tempo, touch: 'hard' }));
+	return CHANNELS.flatMap((shot) =>
+		TOUCHES.filter((touch) => setMod >= (config.highBallMinSet[shot][touch] ?? -Infinity)).map((touch) => ({ shot, tempo, touch }))
+	);
+}
 
 /** The shots on off a set this good: each needs at least its `config.minSet`. */
 export const availableShots = (setMod: number): Shot[] =>
@@ -35,6 +65,7 @@ function blocksAgainst(shots: Shot[]): Channel[] {
  * one. A dig over is always on.
  */
 export function attackOptions(team: Team, hitter: Player, setMod: number): AttackOption[] {
+	if (advancedFor(team)) return advancedOptions(setMod);
 	if (!team.playbook && !team.runKit) {
 		const tempos: (Tempo | undefined)[] = config.blockModes ? [...TEMPOS] : [undefined];
 		return availableShots(setMod).flatMap((shot) => tempos.map((tempo) => ({ shot, tempo })));
@@ -140,7 +171,7 @@ export function defenderZone(stance: Stance, block: Channel): Zone {
  * How well an attack was aimed. A hard shot aimed badly goes straight into the block, whichever
  * channel the blocker took; a tip goes over the block, so it only drifts.
  */
-export function aimResult(shot: Shot, acc: number): AimResult {
+export function aimResult(shot: Shot | Touch, acc: number): AimResult {
 	if (acc <= config.accuracyEasy) return 'easy';
 	if (acc >= config.accuracyExact) return 'exact';
 	return !isSoft(shot) && acc <= config.accuracyIntoBlock ? 'block' : 'drift';
@@ -167,6 +198,53 @@ export function landing(
 	return closest.length === 1 ? closest[0] : pickTie(closest);
 }
 
+/** Advanced mode: where each shot lands if it's on target. Hard and roll go deep, a tip drops short. */
+export const LANDING: Record<Channel, Record<Touch, Zone>> = {
+	line: { hard: 1, tip: 2, roll: 1 },
+	cross: { hard: 5, tip: 4, roll: 5 }
+};
+
+/** Advanced mode: the defender plays the corner of the channel the block leaves open, deep or short. */
+export const CORNER: Record<Channel, Record<Stance, Zone>> = {
+	line: { deep: 5, short: 4 },
+	cross: { deep: 1, short: 2 }
+};
+
+const READ_OUTCOMES: readonly ReadOutcome[] = ['read', 'close', 'wrong'];
+
+/** Advanced mode: the defender's corner against the ball's. Off in depth or in side is close; off in both is wrong. */
+export const readOutcome = (defender: Zone, ball: Zone): ReadOutcome => READ_OUTCOMES[misses(defender, ball)];
+
+/** How many of row and column two zones differ in. */
+function misses(a: Zone, b: Zone): number {
+	const [ra, ca] = GRID[a];
+	const [rb, cb] = GRID[b];
+	return Number(ra !== rb) + Number(ca !== cb);
+}
+
+const CORNERS: readonly Zone[] = [1, 2, 4, 5];
+
+/** Where the called shot is aimed. */
+export const targetOf = (calls: Calls): Zone => (calls.touch ? LANDING[calls.shot as Channel][calls.touch] : TARGET[calls.shot]);
+
+/** Where the defender plays for these calls. */
+export const defenderAt = (calls: Calls): Zone =>
+	calls.touch ? CORNER[calls.block][calls.stance] : defenderZone(calls.stance, calls.block);
+
+/**
+ * Advanced mode: where a high ball lands. A drifting shot drifts toward the defender, to a corner one
+ * step closer to them (onto them, from a close read).
+ */
+export function advancedLanding(calls: Calls, acc: number, pickTie: (zones: Zone[]) => Zone): Zone | 'easy' {
+	const result = aimResult(calls.touch!, acc);
+	if (result === 'easy') return 'easy';
+	const target = targetOf(calls);
+	const defender = defenderAt(calls);
+	if (result !== 'drift' || target === defender) return target;
+	const closer = CORNERS.filter((z) => misses(z, target) === 1 && misses(z, defender) < misses(target, defender));
+	return closer.length === 1 ? closer[0] : pickTie(closer);
+}
+
 /** A short defender reads a tip; a deep one reads a dig over, and the hard shot their blocker leaves open. */
 export const isRead = (shot: Shot, block: Channel, stance: Stance) =>
 	shot === 'tip' ? stance === 'short' : shot === 'over' ? stance === 'deep' : stance === 'deep' && shot !== block;
@@ -186,6 +264,23 @@ export const overReach = (stance: Stance) => (stance === 'deep' ? config.reach[0
 /** Pancake (run mode) gets to a ball one zone away better. */
 export const reach = (dist: number, digger?: Player) =>
 	dist === 1 && digger && has(digger, 'pancake') ? config.abilities.pancakeReach : config.reach[Math.min(dist, config.reach.length - 1)];
+
+/**
+ * How well the defender gets to a ball landing here: their reach and their bonus for reading it. In
+ * advanced mode both come from the read outcome; otherwise from the distance and whether it was read.
+ */
+export function digEffect(calls: Calls, ball: Zone, digger: Player): { reach: number; bonus: number; outcome: ReadOutcome } {
+	if (calls.touch) {
+		const outcome = readOutcome(defenderAt(calls), ball);
+		return { ...config.tempoDig[outcome], outcome };
+	}
+	const read = isRead(calls.shot, calls.block, calls.stance);
+	return {
+		reach: calls.shot === 'over' ? overReach(calls.stance) : reach(distance(defenderAt(calls), ball), digger),
+		bonus: read ? config.readBonus : 0,
+		outcome: read ? 'read' : 'wrong'
+	};
+}
 
 export const digTotal = (defense: number, reach: number, die: number, read: boolean) =>
 	Math.floor(defense * reach) + die + (read ? config.readBonus : 0);
