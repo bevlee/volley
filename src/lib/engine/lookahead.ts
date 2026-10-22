@@ -2,7 +2,7 @@ import { randomChoosers, SERVE_TARGETS, type Choosers } from './choosers';
 import { config } from './config';
 import { playRally } from './rally';
 import { mulberry32, type Rng } from './rng';
-import { attackOptionsIn, availableSpends, blockModesFor, blocksIn, stancesIn } from './rules';
+import { attackOptionsIn, availableSpends, blockModesIn, blocksIn, stancesIn } from './rules';
 import type { BlockMode, Channel, DefenceSpecial, Game, ServeTarget, Shot, Stance, TeamId, Tempo, Touch } from './types';
 
 /** The attacking side's half of a call. */
@@ -71,7 +71,8 @@ function options(game: Game): { attacks: AttackCall[]; defences: DefenceCall[] }
 	const { team, hitter } = game.attack!;
 	const rival: TeamId = team === 'A' ? 'B' : 'A';
 	const pips = config.specials ? game.pips : undefined;
-	const modes: (BlockMode | undefined)[] = config.blockModes ? blockModesFor(game.teams[rival].blocker) : [undefined];
+	const blockModes = blockModesIn(game);
+	const modes: (BlockMode | undefined)[] = blockModes.length ? blockModes : [undefined];
 	const specials: (boolean | undefined)[] = pips && pips[team][hitter] > 0 ? [false, true] : [undefined];
 	const open = pips ? availableSpends(pips[rival]) : [];
 	const spends: (DefenceSpecial | undefined)[] = open.length > 1 ? open : [undefined];

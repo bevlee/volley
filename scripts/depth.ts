@@ -4,8 +4,8 @@ import { LINEUP } from '../src/lib/engine/lineup';
 import { equilibrium, lookahead } from '../src/lib/engine/lookahead';
 import { newGame, other, step } from '../src/lib/engine/rally';
 import { mulberry32, type Rng } from '../src/lib/engine/rng';
-import { attackOptionsIn, blocksIn, stancesIn } from '../src/lib/engine/rules';
-import type { Game, Phase, TeamId } from '../src/lib/engine/types';
+import { attackOptionsIn, blockModesIn, blocksIn, stancesIn } from '../src/lib/engine/rules';
+import type { BlockMode, Channel, Game, Phase, Stance, TeamId } from '../src/lib/engine/types';
 
 /**
  * How much the calls are worth, worked out exactly instead of simulated. Every attack in a rally
@@ -102,8 +102,12 @@ function enumerate(start: Game, done: (g: Game) => boolean, choosers: Choosers =
 
 const scored = (before: Game, after: Game) => after.score.A + after.score.B > before.score.A + before.score.B;
 const atCalls = (g: Game) => g.phase.kind === 'calls' || g.phase.kind === 'pointOver';
-/** The engine rolls nothing between the calls and the hit, so this die is never read. */
-const noDice: Rng = { next: () => Number.NaN };
+/** The calls take no dice once every call is fixed: a die asked for here is a call this script doesn't make. */
+const noDice: Rng = {
+	next() {
+		throw new Error('the calls asked for a die: a call is left to chance');
+	}
+};
 
 function entryKey(g: Game): string {
 	const phase: Phase = g.phase;
@@ -120,15 +124,37 @@ function callKey(g: Game): string {
 
 const label = (o: { shot: string; touch?: string }) => (o.touch ? `${o.shot} ${o.touch}` : o.shot);
 
-/** The defence calls open at this call: a block, and a stance unless it's a quick ball. */
-function defencesIn(g: Game) {
+type DefenceCall = { block: Channel; stance?: Stance; blockMode?: BlockMode };
+
+/**
+ * The defence calls open at this call: a block, and a stance unless it's a quick ball. When the
+ * blocker can stay down, that's a third job beside the two blocks (with a stance that makes no
+ * difference), as the random chooser picks it.
+ */
+function defencesIn(g: Game): DefenceCall[] {
 	const stances = stancesIn(g);
-	return blocksIn(g).flatMap((block) => (stances.length ? stances : [undefined]).map((stance) => ({ block, stance })));
+	const blocks = blocksIn(g);
+	const calls = blocks.flatMap((block) => (stances.length ? stances : [undefined]).map((stance) => ({ block, stance })));
+	if (!blockModesIn(g).includes('none')) return calls;
+	return [
+		...calls.map((c) => ({ ...c, blockMode: 'commit' as const })),
+		...stances.map((stance) => ({ block: blocks[0], stance, blockMode: 'none' as const }))
+	];
 }
 
+/** One name per defence call, the same whichever block a call that stays down carries. */
+const defenceKey = ({ block, stance, blockMode }: DefenceCall) =>
+	blockMode === 'none' ? `down ${stance}` : stance ? `${block} ${stance}` : block;
+
 /** Plays one attack call against one defence call, up to the hit. */
-function toHit(g: Game, attack: { shot: string; touch?: string }, defence: ReturnType<typeof defencesIn>[number]) {
-	const calls = { shot: attack.shot, touch: attack.touch, block: defence.block, stance: defence.stance ?? 'deep' } as Parameters<typeof fixedChoosers>[0];
+function toHit(g: Game, attack: { shot: string; touch?: string }, defence: DefenceCall) {
+	const calls = {
+		shot: attack.shot,
+		touch: attack.touch,
+		block: defence.block,
+		stance: defence.stance ?? 'deep',
+		blockMode: defence.blockMode
+	} as Parameters<typeof fixedChoosers>[0];
 	return step(g, fixedChoosers(calls), noDice);
 }
 
@@ -169,7 +195,7 @@ function explore(): Model {
 			hitter: g.teams[a.team][a.hitter].name,
 			setMod: a.setMod!,
 			attacks: attacks.map(label),
-			defences: defences.map(({ block, stance }) => (stance ? `${block} ${stance}` : block)),
+			defences: defences.map(defenceKey),
 			cells: []
 		};
 		calls.push(call);
@@ -375,16 +401,37 @@ function visits(model: Model, players: Record<TeamId, Player>) {
  */
 function sampledPlayers(model: Model, rollouts: number) {
 	const ai = lookahead(rollouts);
-	const tables = new Map(model.calls.map((call) => [call, ai.table(model.games.get(call)!).payoffs]));
-	const mixes = new Map([...tables].map(([call, m]) => [call, equilibrium(m)]));
-	const smartAttack = (c: Call) => argmax(tables.get(c)!.map(mean));
+	// The lookahead lists its calls in its own order (and each call that stays down once per block
+	// and stance): each of its mixes is mapped onto this model's calls by name.
+	const onto = (names: string[], theirs: string[], mix: number[]) =>
+		names.map((name) => theirs.reduce((sum, t, k) => sum + (t === name ? mix[k] : 0), 0));
+	const looked = new Map(
+		model.calls.map((call) => {
+			const t = ai.table(model.games.get(call)!);
+			return [call, { t, attacks: t.attacks.map(label), defences: t.defences.map(defenceKey) }];
+		})
+	);
+	const mixes = new Map(
+		[...looked].map(([call, { t, attacks, defences }]) => {
+			const eq = equilibrium(t.payoffs);
+			return [call, { attack: onto(call.attacks, attacks, eq.attack), defence: onto(call.defences, defences, eq.defence) }];
+		})
+	);
+	const pure = (names: string[], theirs: string[], k: number) => onto(names, theirs, oneHot(theirs.length, k));
+	const smartAttack = (c: Call) => argmax(looked.get(c)!.t.payoffs.map(mean));
 	return {
 		mixed: { attack: (c) => mixes.get(c)!.attack, defence: (c) => mixes.get(c)!.defence } as Player,
 		smart: {
-			attack: (c) => oneHot(c.attacks.length, smartAttack(c)),
-			defence: (c) => oneHot(c.defences.length, argmin(c.defences.map((_, j) => mean(tables.get(c)!.map((row) => row[j])))))
+			attack: (c) => pure(c.attacks, looked.get(c)!.attacks, smartAttack(c)),
+			defence: (c) => {
+				const { t, defences } = looked.get(c)!;
+				return pure(c.defences, defences, argmin(t.defences.map((_, j) => mean(t.payoffs.map((row) => row[j])))));
+			}
 		} as Player,
-		readerDefence: (c: Call) => oneHot(c.defences.length, argmin(tables.get(c)![smartAttack(c)]))
+		readerDefence: (c: Call) => {
+			const { t, defences } = looked.get(c)!;
+			return pure(c.defences, defences, argmin(t.payoffs[smartAttack(c)]));
+		}
 	};
 }
 

@@ -1,5 +1,6 @@
+import { config } from './config';
 import { pick, type Rng } from './rng';
-import { attackOptionsIn, availableSpends, blockModesFor, blocksIn } from './rules';
+import { attackOptionsIn, availableSpends, blockModesIn, blocksIn } from './rules';
 import type { BlockMode, Calls, Channel, DefenceSpecial, Game, ServeTarget, Shot, Stance, TeamId, Tempo, Touch } from './types';
 
 export const SERVE_TARGETS: readonly ServeTarget[] = ['blocker', 'defender', 'seam'];
@@ -37,7 +38,9 @@ export const randomChoosers: Choosers = {
 		const tempos = attackOptionsIn(game).flatMap((o) => (o.shot === shot && o.tempo ? [o.tempo] : []));
 		return pick(rng, tempos.length ? tempos : TEMPOS);
 	},
-	blockMode: (game, team, rng) => pick(rng, blockModesFor(game.teams[team].blocker)),
+	// Advanced mode: staying down is one of the blocker's three jobs, with blocking line and blocking cross.
+	blockMode: (game, _team, rng) =>
+		pick(rng, config.blockModes ? blockModesIn(game) : [...blocksIn(game).map(() => 'commit' as const), 'none' as const]),
 	// The touches open for the shot already called.
 	touch: (game, _team, rng) => {
 		const shot = game.attack!.calls!.shot;

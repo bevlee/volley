@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { fixedChoosers } from './choosers';
+import { fixedChoosers, randomChoosers } from './choosers';
 import { config } from './config';
 import { NUMBERED } from './lineup';
 import { newGame, step } from './rally';
-import { scriptedDice } from './rng';
+import { mulberry32, scriptedDice } from './rng';
+import { blockModesIn } from './rules';
 import type { Calls, Game } from './types';
 
 const saved = structuredClone(config);
@@ -21,8 +22,9 @@ afterEach(() => Object.assign(config, structuredClone(saved)));
 /** A game of all-4 players where B has served, so the next step is A1's pass and A1 hits. */
 const served = () => step(newGame(1, NUMBERED));
 
+/** Plays `n` steps with these calls; the blocker blocks unless the calls say otherwise. */
 function run(n: number, calls: Calls, dice: number[], start: Game = served()): Game {
-	const choosers = fixedChoosers(calls);
+	const choosers = fixedChoosers({ blockMode: 'commit', ...calls });
 	const rng = scriptedDice(dice);
 	let g = start;
 	for (let i = 0; i < n; i++) g = step(g, choosers, rng);
@@ -125,6 +127,32 @@ describe('advanced mode rallies', () => {
 		it("won't take a shot the set doesn't leave on", () => {
 			// Pass 1 (−2), set 3: a −3 set, too poor for line roll.
 			expect(() => run(3, { shot: 'line', touch: 'roll', block: 'line', stance: 'deep' }, [1, 3])).toThrow(/isn't on/);
+		});
+	});
+
+	describe('staying down', () => {
+		it('is open against a high ball, and against a quick ball the blocker just blocks', () => {
+			const calls: Calls = { shot: 'line', touch: 'hard', block: 'line', stance: 'deep' };
+			// Pass 4 (±0) and set 4: a high ball. Pass 6 (+2) and set 4: a quick ball.
+			expect(blockModesIn(run(2, calls, [4, 4]))).toEqual(['commit', 'none']);
+			expect(blockModesIn(run(2, calls, [6, 4]))).toEqual([]);
+		});
+
+		it('leaves a hard shot down the line unblocked, and every ball a scramble with the help', () => {
+			// Hard line: 4 + 3 + the setter's (4 + 4) / 2 = 11, aimed 4 + 4 = 8. Dig 4 × 0.5 + 6 + 1 + 2 = 11: up.
+			const g = run(4, { shot: 'line', touch: 'hard', block: 'line', stance: 'short', blockMode: 'none' }, [4, 4, 3, 4, 6]);
+			expect(entries(g, 'calls')[0].text).toContain('stays down');
+			expect(entries(g, 'block')).toHaveLength(0);
+			expect(entries(g, 'dig')[0].data).toMatchObject({ outcome: 'close', total: 11, attack: 11, up: true });
+		});
+
+		it('is one of the three jobs a random blocker picks from', () => {
+			const atCalls = run(2, { shot: 'line', touch: 'tip', block: 'line', stance: 'deep' }, [4, 4]);
+			const rng = mulberry32(7);
+			const draws = 3000;
+			let down = 0;
+			for (let i = 0; i < draws; i++) if (randomChoosers.blockMode!(atCalls, 'B', rng) === 'none') down++;
+			expect(down / draws).toBeCloseTo(1 / 3, 1);
 		});
 	});
 });

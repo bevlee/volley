@@ -31,11 +31,11 @@ describe('lookahead in advanced mode', () => {
 		]);
 	});
 
-	it('weighs every high-ball shot against every block and stance', () => {
+	it('weighs every high-ball shot against every block and stance, blocking or staying down', () => {
 		// Pass 4 (±0), set 4: a ±0 set.
 		const t = table(atCalls(4, 4));
 		expect(t.attacks).toHaveLength(6);
-		expect(t.defences).toHaveLength(4);
+		expect(t.defences.map((d) => d.blockMode)).toEqual(['commit', 'none', 'commit', 'none', 'commit', 'none', 'commit', 'none']);
 		expect(t.payoffs.flat().every((p) => p >= 0 && p <= 1)).toBe(true);
 	});
 });

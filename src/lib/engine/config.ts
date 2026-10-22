@@ -83,6 +83,13 @@ export const config = {
 		tip: { set: 1, bonus: 0 },
 		roll: { set: 2, bonus: 0 }
 	} as Record<Touch, { set: number; bonus: number }>,
+	/**
+	 * Advanced mode: against a high ball the blocker can stay down instead of blocking: no block, and
+	 * every ball is a close read for the dig, with `noBlockDigBonus` for the help. Right against a
+	 * soft shot, wrong against a hard one. Without it, blocking cost nothing, and the defence's only
+	 * call that mattered was deep or short.
+	 */
+	stayDown: true,
 	/** A fast set is harder to aim. */
 	fastAccuracyMod: -2,
 	/** A reading blocker gets to a shot down the other channel on a d6 this high or lower. */

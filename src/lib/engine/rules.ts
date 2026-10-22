@@ -104,6 +104,16 @@ export function blockModesFor(_blocker: Player): BlockMode[] {
 	return [...BLOCK_MODES];
 }
 
+/**
+ * How the defending blocker can play the attack now: every mode, with block modes on; in advanced
+ * mode with `config.stayDown`, block or stay down against a high ball. Empty when there's no call.
+ */
+export function blockModesIn(g: Game): BlockMode[] {
+	const rival = g.attack!.team === 'A' ? 'B' : 'A';
+	if (config.blockModes) return blockModesFor(g.teams[rival].blocker);
+	return config.stayDown && tempoIn(g) === 'high' ? ['commit', 'none'] : [];
+}
+
 /** Row and column of each zone from the team's own view: front row 4-3-2, back row 5-6-1. */
 export const GRID: Record<Zone, readonly [row: number, col: number]> = {
 	4: [0, 0],
@@ -276,7 +286,8 @@ export const reach = (dist: number, digger?: Player) =>
  */
 export function digEffect(calls: Calls, ball: Zone, digger: Player): { reach: number; bonus: number; outcome: ReadOutcome } {
 	if (calls.touch) {
-		const outcome = readOutcome(defenderAt(calls), ball);
+		// Staying down, both defenders dig: nobody is on the ball, and nobody is far from it.
+		const outcome = calls.blockMode === 'none' ? 'close' : readOutcome(defenderAt(calls), ball);
 		return { ...config.tempoDig[outcome], outcome };
 	}
 	const read = isRead(calls.shot, calls.block, calls.stance);

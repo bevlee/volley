@@ -233,10 +233,8 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				block: choosers.block(g, defending, rng),
 				stance: choosers.stance(g, defending, rng)
 			};
-			if (config.blockModes) {
-				a.calls.tempo = (choosers.tempo ?? randomChoosers.tempo!)(g, a.team, rng);
-				a.calls.blockMode = (choosers.blockMode ?? randomChoosers.blockMode!)(g, defending, rng);
-			}
+			if (config.blockModes) a.calls.tempo = (choosers.tempo ?? randomChoosers.tempo!)(g, a.team, rng);
+			if (rules.blockModesIn(g).length) a.calls.blockMode = (choosers.blockMode ?? randomChoosers.blockMode!)(g, defending, rng);
 			const tempo = rules.tempoIn(g);
 			if (tempo) {
 				a.calls.tempo = tempo;
@@ -263,12 +261,13 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const { shot, touch } = a.calls;
 			if (!open.some((o) => o.shot === shot && o.touch === touch && (!o.tempo || !a.calls!.tempo || o.tempo === a.calls!.tempo)))
 				throw new Error(`${a.calls.tempo ? `${a.calls.tempo} ` : ''}${shot}${touch ? ` ${touch}` : ''} isn't on off a ${signed(a.setMod!)} set`);
-			if (a.calls.blockMode && !rules.blockModesFor(g.teams[defending].blocker).includes(a.calls.blockMode))
+			if (a.calls.blockMode && !rules.blockModesIn(g).includes(a.calls.blockMode))
 				throw new Error(`${g.teams[defending].blocker.name} can't ${a.calls.blockMode}`);
 			const attackText = touch ? `${tempo === 'fast' ? 'quick' : 'high'} ${shot} ${touch}` : shot;
-			const stanceText = tempo === 'fast' ? '' : `, defender ${a.calls.stance}`;
+			const stayDown = touch && a.calls.blockMode === 'none';
+			const stanceText = tempo === 'fast' || stayDown ? '' : `, defender ${a.calls.stance}`;
 			log(
-				`Calls · ${a.team} ${attackText}${a.calls.special ? ' (special)' : ''} · ${defending} blocks ${a.calls.block}${stanceText}${a.calls.defenceSpecial ? ` (special ${a.calls.defenceSpecial})` : ''}`,
+				`Calls · ${a.team} ${attackText}${a.calls.special ? ' (special)' : ''} · ${defending} ${stayDown ? 'stays down' : `blocks ${a.calls.block}`}${stanceText}${a.calls.defenceSpecial ? ` (special ${a.calls.defenceSpecial})` : ''}`,
 				'calls',
 				{
 					...a.calls,
