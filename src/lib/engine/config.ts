@@ -66,6 +66,23 @@ export const config = {
 		close: { reach: 0.25, bonus: 1 },
 		wrong: { reach: 0, bonus: 0 }
 	} as Record<ReadOutcome, { reach: number; bonus: number }>,
+	/**
+	 * Advanced mode: what each touch's power and aim take from the set (`set` times the set modifier,
+	 * plus `bonus`), on top of the hitter's attack and the die. A hard hit takes the set twice over, so
+	 * it's the shot off a good set and a mistake off a bad one; a roll and a tip hit the same off any
+	 * set, softer, and a roll needs a good set to aim. With every touch as strong as a hit, a ball
+	 * nobody reads is a kill whatever the touch, and no call is better than another (npm run sim:depth).
+	 */
+	touchPower: {
+		hard: { set: 2, bonus: 0 },
+		tip: { set: 0, bonus: -4 },
+		roll: { set: 0, bonus: -1 }
+	} as Record<Touch, { set: number; bonus: number }>,
+	touchAim: {
+		hard: { set: 1, bonus: 0 },
+		tip: { set: 1, bonus: 0 },
+		roll: { set: 2, bonus: 0 }
+	} as Record<Touch, { set: number; bonus: number }>,
 	/** A fast set is harder to aim. */
 	fastAccuracyMod: -2,
 	/** A reading blocker gets to a shot down the other channel on a d6 this high or lower. */

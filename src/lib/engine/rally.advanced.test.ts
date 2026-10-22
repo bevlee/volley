@@ -50,7 +50,7 @@ describe('advanced mode rallies', () => {
 	});
 
 	describe('a quick ball', () => {
-		// Pass 6 (+2), set 4 (+2), power 3: 4 + 3 + 2 = 9, plus the setter's (4 + 4) / 2 = 13.
+		// Pass 6 (+2), set 4 (+2), power 3: 4 + 3 + 2 × 2 = 11, plus the setter's (4 + 4) / 2 = 15.
 		const quick = [6, 4, 3];
 
 		it('is a kill when the block goes the other way, with no aim roll', () => {
@@ -60,21 +60,21 @@ describe('advanced mode rallies', () => {
 		});
 
 		it('meets the block down its channel with the quick-ball bonus: clean is a kill', () => {
-			// Block 4 + 2 + 3 = 9 vs 13: clean.
+			// Block 4 + 2 + 3 = 9 vs 15: clean.
 			const g = run(4, { shot: 'cross', touch: 'hard', block: 'cross', stance: 'short' }, [...quick, 2]);
 			expect(entries(g, 'block')[0].data).toMatchObject({ result: 'clean', total: 9 });
 			expect(lastPoint(g)).toMatchObject({ winner: 'A', kind: 'kill' });
 		});
 
 		it('a block touch is the blocking side\'s first contact', () => {
-			// Block 4 + 6 + 3 = 13 vs 13: a touch.
+			// Block 4 + 6 + 3 = 13 vs 15: a touch.
 			const g = run(4, { shot: 'cross', touch: 'hard', block: 'cross', stance: 'short' }, [...quick, 6]);
 			expect(g.phase.kind).toBe('touched');
 		});
 
 		it('a stuff scores for the block', () => {
-			config.quickBlockBonus = 6;
-			// Block 4 + 6 + 6 = 16 vs 13: stuffed.
+			config.quickBlockBonus = 8;
+			// Block 4 + 6 + 8 = 18 vs 15: stuffed.
 			const g = run(4, { shot: 'line', touch: 'hard', block: 'line', stance: 'deep' }, [...quick, 6]);
 			expect(lastPoint(g)).toMatchObject({ winner: 'B', kind: 'stuff' });
 		});
@@ -85,15 +85,15 @@ describe('advanced mode rallies', () => {
 		const high = [4, 4, 3, 4];
 
 		it("a close read is a scramble, at the close row's reach and bonus", () => {
-			// Line tip (4 + 3 = 7, no setter share) lands in 2; the defender plays 1. Dig 4 × 0.5 + 5 + 1 = 8: up.
+			// Line tip (4 + 3 − 4 = 3, no setter share) lands in 2; the defender plays 1. Dig 4 × 0.5 + 5 + 1 = 8: up.
 			const g = run(4, { shot: 'line', touch: 'tip', block: 'cross', stance: 'deep' }, [...high, 5]);
 			const dig = entries(g, 'dig')[0];
-			expect(dig.data).toMatchObject({ outcome: 'close', total: 8, attack: 7, up: true });
+			expect(dig.data).toMatchObject({ outcome: 'close', total: 8, attack: 3, up: true });
 			expect(dig.text).toContain('scrambles');
 		});
 
 		it('a soft shot goes over the block', () => {
-			// Line roll lands in 1 past a line block; the defender plays 5 (close). Dig 2 + 1 + 1 = 4 vs 7: a kill.
+			// Line roll (4 + 3 − 1 = 6) lands in 1 past a line block; the defender plays 5 (close). Dig 2 + 1 + 1 = 4 vs 6: a kill.
 			const g = run(4, { shot: 'line', touch: 'roll', block: 'line', stance: 'deep' }, [...high, 1]);
 			expect(entries(g, 'block')).toHaveLength(0);
 			expect(lastPoint(g)).toMatchObject({ winner: 'A', kind: 'kill' });
@@ -102,6 +102,24 @@ describe('advanced mode rallies', () => {
 		it("a hard shot down the block's channel meets the block", () => {
 			const g = run(4, { shot: 'line', touch: 'hard', block: 'line', stance: 'deep' }, [...high, 3, 3]);
 			expect(entries(g, 'block')).toHaveLength(1);
+		});
+
+		describe('each touch takes its own share of the set', () => {
+			// Pass 3 (±0) and set 3: a −1 set. Power die 3, aim die 4; the setter adds 4 to the aim.
+			const minusOne = [3, 3, 3, 4];
+			it.each([
+				// 4 + 3 − 2 (the set twice over), plus the setter's (4 + 3) / 2: 8. Aim 4 − 1 + 4 = 7.
+				['hard', 8, 7],
+				// 4 + 3 − 4, whatever the set. Aim 4 − 1 + 4 = 7.
+				['tip', 3, 7],
+				// 4 + 3 − 1, whatever the set, but aimed off the set twice over: 4 − 2 + 4 = 6.
+				['roll', 6, 6]
+			] as const)('a %s hits %i and aims %i off a −1 set', (touch, power, aim) => {
+				const g = run(4, { shot: 'cross', touch, block: 'line', stance: 'short' }, [...minusOne, 6, 6]);
+				expect(g.attack!.setMod).toBe(-1);
+				expect(g.attack!.incoming).toBe(power);
+				expect(g.attack!.accuracy).toBe(aim);
+			});
 		});
 
 		it("won't take a shot the set doesn't leave on", () => {

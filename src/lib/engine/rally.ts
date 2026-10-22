@@ -314,8 +314,9 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const lineBoost =
 				(calls.shot === 'line' && rules.has(hitter, 'lineSpecialist') ? config.abilities.lineSpecialistPower : 0) +
 				(calls.tempo === 'fast' && rules.has(hitter, 'quick') ? config.abilities.quickPower : 0);
+			const setPower = calls.touch ? rules.touchSet(calls.touch, setMod) : setMod;
 			const power =
-				rules.power(hitter.attack, powerDie, setMod) + special + (heavy ? config.abilities.heavyHitterPower : 0) + lineBoost;
+				rules.power(hitter.attack, powerDie, setPower) + special + (heavy ? config.abilities.heavyHitterPower : 0) + lineBoost;
 			const hitData = () => ({
 				team: a.team,
 				slot: a.hitter,
@@ -323,7 +324,7 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				shot: calls.shot,
 				attack: a.incoming!
 			});
-			const powerText = `${hitter.attack} + ${powerDie}${plus(setMod)}${special ? ` + ${special} special` : ''}${heavy ? ` + ${config.abilities.heavyHitterPower} heavy` : ''}${lineBoost ? ` + ${lineBoost} ability` : ''} = ${power}`;
+			const powerText = `${hitter.attack} + ${powerDie}${plus(setPower)}${special ? ` + ${special} special` : ''}${heavy ? ` + ${config.abilities.heavyHitterPower} heavy` : ''}${lineBoost ? ` + ${lineBoost} ability` : ''} = ${power}`;
 			if (over) {
 				a.incoming = config.overPower + powerDie;
 				log(`${hitter.name} digs it over deep · ${config.overPower} + ${powerDie} = ${a.incoming}`, 'hit', hitData());
@@ -391,8 +392,9 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const specialAim = calls.special ? config.specialHitAccuracy : 0;
 			// Abilities: Heavy hitter aims worse.
 			const abilityAim = heavy ? config.abilities.heavyHitterAim : 0;
-			a.accuracy = rules.accuracy(accDie, a.firstMod, setMod, setter.attack) + tempoMod + specialAim + abilityAim;
-			const accText = `Accuracy ${accDie}${plus(a.firstMod)}${plus(setMod)} + ${setter.attack}${tempoMod ? `${plus(tempoMod)} fast` : ''}${specialAim ? ` + ${specialAim} special` : ''}${abilityAim ? `${plus(abilityAim)} ability` : ''} = ${a.accuracy}`;
+			const setAim = calls.touch ? rules.touchAim(calls.touch, setMod) : setMod;
+			a.accuracy = rules.accuracy(accDie, a.firstMod, setAim, setter.attack) + tempoMod + specialAim + abilityAim;
+			const accText = `Accuracy ${accDie}${plus(a.firstMod)}${plus(setAim)} + ${setter.attack}${tempoMod ? `${plus(tempoMod)} fast` : ''}${specialAim ? ` + ${specialAim} special` : ''}${abilityAim ? `${plus(abilityAim)} ability` : ''} = ${a.accuracy}`;
 			const tie = (zones: Zone[]) => pick(rng, zones);
 			const where = calls.touch
 				? rules.advancedLanding(calls, a.accuracy, tie)

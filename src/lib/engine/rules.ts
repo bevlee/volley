@@ -146,6 +146,12 @@ export const servePass = (die: number, defense: number, seam: boolean) =>
 
 export const power = (attack: number, die: number, setMod: number) => attack + die + setMod;
 
+/** Advanced mode: what a touch's power takes from the set. */
+export const touchSet = (touch: Touch, setMod: number) => config.touchPower[touch].set * setMod + config.touchPower[touch].bonus;
+
+/** Advanced mode: what a touch's aim takes from the set. */
+export const touchAim = (touch: Touch, setMod: number) => config.touchAim[touch].set * setMod + config.touchAim[touch].bonus;
+
 /** The setter's share of a hard attack: half their attack stat plus their set die, so a good set hits harder. */
 export const teamAttack = (power: number, setterAttack: number, setDie: number) =>
 	config.partnerPoolOnAttack ? power + Math.floor((setterAttack + setDie) / 2) : power;
