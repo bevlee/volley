@@ -3,7 +3,7 @@ import { config } from '../src/lib/engine/config';
 import { LINEUP } from '../src/lib/engine/lineup';
 import { lookahead } from '../src/lib/engine/lookahead';
 import { newGame, playGame } from '../src/lib/engine/rally';
-import type { Channel, Game, Touch } from '../src/lib/engine/types';
+import type { Game } from '../src/lib/engine/types';
 import { matchup, pct } from './matchups';
 
 /**
@@ -19,10 +19,10 @@ import { matchup, pct } from './matchups';
  * and the depth measures, each against random calls:
  *
  * - mixed vs random: what balanced play is worth.
- * - mixed defence vs random: the same, for the defence's calls alone. Against a random attack in
- *   advanced mode this sits near 50% by design: every shot has one read, two closes and one wrong,
- *   so no defence call is better than another until the set takes shots away.
+ * - mixed defence vs random: the same, for the defence's calls alone.
  * - reader vs smart: what defending against a predictable attacker's habits is worth.
+ *
+ * npm run sim:depth works the same numbers out exactly, in seconds, with each rule taken out in turn.
  *
  *   npm run sim:tempo -- [games per matchup] [rollouts per cell] [variant names...]
  */
@@ -30,40 +30,19 @@ const games = Number(process.argv[2] ?? 200);
 const rollouts = Number(process.argv[3] ?? 40);
 const only = process.argv.slice(4);
 
-type MinSets = Record<Channel, Record<Touch, number | null>>;
-const minSets = (hard: number | null, lineRoll: number | null, crossRoll = lineRoll): MinSets => ({
-	line: { hard, tip: null, roll: lineRoll },
-	cross: { hard, tip: null, roll: crossRoll }
-});
-
 /** Each variant changes advanced mode's defaults (or turns it off). */
 const variants: [string, () => void][] = [
 	['today', () => (config.advanced = false)],
-	[
-		'as briefed',
-		() => {
-			config.quickBlockBonus = 3;
-			config.tempoDig = { read: { reach: 1, bonus: 3 }, close: { reach: 0.5, bonus: 1 }, wrong: { reach: 0.25, bonus: 0 } };
-			config.highBallMinSet = minSets(null, null);
-		}
-	],
-	['all open', () => (config.highBallMinSet = minSets(null, null))],
-	['hard ≥ −2', () => (config.highBallMinSet = minSets(-2, null))],
-	['hard ≥ −1, roll ≥ −3', () => (config.highBallMinSet = minSets(-1, -3))],
-	['hard ≥ ±0, roll ≥ −2', () => (config.highBallMinSet = minSets(0, -2))],
-	['hard ≥ −1, line roll ≥ −2', () => (config.highBallMinSet = minSets(-1, -2, null))],
 	['default', () => {}],
 	['quick block +6', () => (config.quickBlockBonus = 6)],
 	['quick block +10', () => (config.quickBlockBonus = 10)],
-	['read +2', () => (config.tempoDig = { ...config.tempoDig, read: { reach: 1, bonus: 2 } })],
-	['read +2, close +0', () => (config.tempoDig = { ...config.tempoDig, read: { reach: 1, bonus: 2 }, close: { reach: 0.25, bonus: 0 } })],
 	['Kageyama defense 3', () => (LINEUP.B.defender.defense = 3)]
 ];
 
 const lineup = structuredClone(LINEUP);
 const defaults = structuredClone(config);
 const ai = lookahead(rollouts);
-const mixedDefence: Choosers = { ...randomChoosers, block: ai.mixed.block, stance: ai.mixed.stance };
+const mixedDefence: Choosers = { ...randomChoosers, block: ai.mixed.block, stance: ai.mixed.stance, blockMode: ai.mixed.blockMode };
 
 /** Kill rates, rally length and A's games, from the logs of balanced games. */
 function balanced() {
