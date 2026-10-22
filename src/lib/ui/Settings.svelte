@@ -9,7 +9,6 @@
 		{ value: 'slow', label: 'Slow' }
 	];
 	const MOTIONS: { value: Motion; label: string }[] = [
-		{ value: 'device', label: 'Device' },
 		{ value: 'on', label: 'On' },
 		{ value: 'reduced', label: 'Reduced' }
 	];
@@ -54,8 +53,7 @@
 			{/each}
 		</div>
 		<p class="note">
-			Device follows your phone or computer's reduce-motion setting. On always plays the court out; Reduced skips the
-			ball's flights, the players' runs and the court's shakes.
+			Reduced skips the ball's flights, the players' runs and the court's shakes.
 		</p>
 	</div>
 </dialog>
