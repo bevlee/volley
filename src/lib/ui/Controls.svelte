@@ -1,6 +1,7 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { config } from '#lib/engine/config.ts';
-	import type { AttackOption, BlockMode, Channel, DefenceSpecial, Shot, Stance } from '#lib/engine/types.ts';
+	import type { AttackOption, BlockMode, Channel, DefenceSpecial, Stance } from '#lib/engine/types.ts';
 
 	let {
 		status,
@@ -25,7 +26,9 @@
 		onnewgame,
 		charges = null,
 		special = $bindable(false),
-		spend = $bindable('none')
+		spend = $bindable('none'),
+		calls = null,
+		reveal = null
 	}: {
 		/** One line on whose call it is or what just happened. */
 		status: string;
@@ -48,7 +51,7 @@
 		/** Hits the picked shot: the calls are revealed, then the attack rolls. */
 		onattack: () => void;
 		/** Hovering or focusing a shot previews it on the court; null when it stops. */
-		onpreview: (shot: Shot | null) => void;
+		onpreview: (o: AttackOption | null) => void;
 		over: boolean;
 		/** What the next step does, e.g. "Attack!", or what it's waiting for online. */
 		next: string;
@@ -67,6 +70,10 @@
 		special?: boolean;
 		/** The player's defence spends one of the blocker's or digger's charges. */
 		spend?: DefenceSpecial;
+		/** Advanced mode: its own attack and defence calls, in place of these; null for a normal game. */
+		calls?: Snippet | null;
+		/** Advanced mode: what the block and dig did to the latest hit, over the step button. */
+		reveal?: Snippet | null;
 	} = $props();
 
 	const toggleSpend = (on: DefenceSpecial) => (spend = spend === on ? 'none' : on);
@@ -110,6 +117,10 @@
 		</ol>
 	{/if}
 	<p class="status" aria-live="polite">{status}</p>
+	{#if calls && (choosing || defending) && !over}
+		{@render calls()}
+	{:else}
+	{#if reveal}{@render reveal()}{/if}
 	<div class="row">
 		{#if over}
 			<button class="primary" disabled={overDisabled} onclick={(e) => run(e, onnewgame)}>{overLabel}</button>
@@ -120,9 +131,9 @@
 						class:on={picked(c)}
 						aria-pressed={picked(c)}
 						onclick={(e) => run(e, () => onpick(c))}
-						onmouseenter={() => onpreview(c.shot)}
+						onmouseenter={() => onpreview(c)}
 						onmouseleave={() => onpreview(null)}
-						onfocus={() => onpreview(c.shot)}
+						onfocus={() => onpreview(c)}
 						onblur={() => onpreview(null)}
 					>
 						{c.label} <kbd>{i + 1}</kbd>
@@ -211,6 +222,7 @@
 			{#if modes}Commit takes the channel; read starts there and may get across, but late; no block helps the dig.{/if}
 			{#if charges}<span class="star">★</span> A special is spent when you lock in, even if they hit somewhere else.{/if}
 		</p>
+	{/if}
 	{/if}
 </section>
 

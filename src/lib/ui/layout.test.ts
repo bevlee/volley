@@ -1,3 +1,4 @@
+import { config } from '../engine/config';
 import { describe, expect, it } from 'vitest';
 import { NUMBERED } from '../engine/lineup';
 import { fixedChoosers } from '../engine/choosers';
@@ -300,10 +301,27 @@ describe('previewDefence', () => {
 		g.phase = { kind: 'calls' };
 		g.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0 };
 		// blocking cross leaves the line open, so a deep defender covers the line in 1
-		expect(previewDefence(g, 'cross', 'deep').B).toEqual({ blocker: 2, defender: 1 });
-		expect(previewDefence(g, 'line', 'short').B).toEqual({ blocker: 2, defender: 3 });
+		expect(previewDefence(g, { block: 'cross', stance: 'deep' }).B).toEqual({ blocker: 2, defender: 1 });
+		expect(previewDefence(g, { block: 'line', stance: 'short' }).B).toEqual({ blocker: 2, defender: 3 });
 		// the attackers don't move
-		expect(previewDefence(g, 'line', 'short').A).toEqual(positions(g).A);
+		expect(previewDefence(g, { block: 'line', stance: 'short' }).A).toEqual(positions(g).A);
+	});
+
+	it('in advanced mode, plays a corner on a high ball, stays put on a quick one, and drops off the net to stay down', () => {
+		const advanced = config.advanced;
+		config.advanced = true;
+		try {
+			const g = newGame(1, NUMBERED);
+			g.phase = { kind: 'calls' };
+			g.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0, setDie: 4, setMod: 0 };
+			expect(previewDefence(g, { block: 'cross', stance: 'short' }).B).toEqual({ blocker: 2, defender: 2 });
+			expect(previewDefence(g, { block: 'line', stance: 'short' }).B).toEqual({ blocker: 2, defender: 4 });
+			expect(previewDefence(g, { block: 'line', stance: 'short', blockMode: 'none' }).B).toEqual({ blocker: 3, defender: 6 });
+			g.attack.setMod = 2;
+			expect(previewDefence(g, { block: 'line', stance: 'short' }).B).toEqual({ blocker: 2, defender: 6 });
+		} finally {
+			config.advanced = advanced;
+		}
 	});
 });
 

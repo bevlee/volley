@@ -65,7 +65,7 @@ export function tempoBanner(g: Game, controlled: TeamId | null): TempoBanner {
 /** What the defence does to a ball landing in a zone: blocks it, reads it, scrambles for it, or leaves it open. */
 export type Cover = 'blocked' | 'read' | 'close' | 'open';
 
-export const COVER_WORD: Record<Cover, string> = { blocked: 'blocked', read: 'dug', close: 'scramble', open: 'open' };
+export const ZONE_WORD: Record<Cover, string> = { blocked: 'blocked', read: 'dug', close: 'scramble', open: 'open' };
 
 const FROM_READ: Record<ReadOutcome, Cover> = { read: 'read', close: 'close', wrong: 'open' };
 

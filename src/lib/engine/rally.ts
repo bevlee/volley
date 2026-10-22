@@ -192,7 +192,8 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				team: other(dug.team),
 				hitter: 'defender',
 				source: 'dig',
-				dugAt: rules.defenderAt(dug.calls!),
+				// Staying down (advanced mode), nobody is on a corner: the defender digs from deep middle.
+				dugAt: dug.calls!.touch && dug.calls!.blockMode === 'none' ? 6 : rules.defenderAt(dug.calls!),
 				firstDie: die,
 				// Libero instincts: a dig that comes up sets up a better attack.
 				firstMod: rules.firstTouch(
