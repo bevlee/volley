@@ -154,6 +154,13 @@ describe('replaying an advanced game', () => {
 		expect(() => replayGame(record)).toThrow(/the computer's touch replays as roll/);
 	});
 
+	it("refuses a player's call the rules don't allow, as a bad record", () => {
+		const { record } = playMixedAdvanced(4);
+		const call = record.calls.find((c) => c.blockMode !== undefined && !c.byComputer.defence)!;
+		call.blockMode = 'read';
+		expect(() => replayGame(record)).toThrow(ReplayError);
+	});
+
 	it('records normal games as normal, with no touches', () => {
 		const { game, byComputer } = playMixed(1);
 		const record = recordGame(game, byComputer);

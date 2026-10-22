@@ -86,7 +86,14 @@ function recordedChoosers(record: GameRecord) {
  */
 export function replayGame(record: GameRecord): Game {
 	const { choosers, used } = recordedChoosers(record);
-	const g = withRules(record.rules, () => playGame(newGame(record.seed), choosers));
+	const g = withRules(record.rules, () => {
+		try {
+			return playGame(newGame(record.seed), choosers);
+		} catch (e) {
+			// A recorded call the rules don't allow (a tip on a quick ball, say) is a bad record, not a crash.
+			throw e instanceof ReplayError ? e : new ReplayError((e as Error).message);
+		}
+	});
 	if (g.phase.kind !== 'gameOver') throw new ReplayError('the game never ends');
 	if (used() !== record.calls.length)
 		throw new ReplayError(`the game ended after ${used()} of ${record.calls.length} recorded calls`);
