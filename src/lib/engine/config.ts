@@ -44,13 +44,13 @@ export const config = {
 	advanced: false,
 	quickBallMinSet: 2,
 	/**
-	 * The worst set each high-ball shot can be hit off; null means it's always on. Tips stay on and
-	 * the worst set leaves at least three shots (rules.advanced.test checks both). Every cut-off the
-	 * sim tried took away more depth than it added; this, the mildest, costs least.
+	 * The worst set each high-ball shot can be hit off; null means it's always on. All on: hitting
+	 * hard off a bad set is a call to get right, not one to take away (npm run sim:depth: gating hard
+	 * below −2 costs a point of balanced vs random in 100).
 	 */
 	highBallMinSet: {
-		line: { hard: -2, tip: null, roll: null },
-		cross: { hard: -2, tip: null, roll: null }
+		line: { hard: null, tip: null, roll: null },
+		cross: { hard: null, tip: null, roll: null }
 	} as Record<Channel, Record<Touch, number | null>>,
 	/**
 	 * The block's bonus on a quick ball down its channel, in place of `blockBonus`. A guess the other

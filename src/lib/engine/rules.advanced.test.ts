@@ -46,15 +46,8 @@ describe('advanced mode rules', () => {
 		beforeEach(() => Object.assign(config, structuredClone(saved), { advanced: true }));
 		const worstSet = ladder(1 + Math.min(firstTouch(1), config.touchFirstMod));
 
-		it('always leaves the tips on', () => {
-			for (const setMod of [worstSet, -1, 0, 1]) {
-				const touches = attackOptions(team(), team().blocker, setMod).filter((o) => o.touch === 'tip');
-				expect(touches.map((o) => o.shot)).toEqual(['line', 'cross']);
-			}
-		});
-
-		it('leaves at least three shots off the worst set', () =>
-			expect(attackOptions(team(), team().blocker, worstSet).length).toBeGreaterThanOrEqual(3));
+		it.each([worstSet, -1, 0, 1])('leaves all six high-ball shots on off a %i set', (setMod) =>
+			expect(attackOptions(team(), team().blocker, setMod)).toHaveLength(6));
 	});
 
 	describe('reads', () => {
