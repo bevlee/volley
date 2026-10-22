@@ -3,6 +3,8 @@ export type Slot = 'blocker' | 'defender';
 /** `over` is a dig over: no swing, a soft ball sent deep (run mode). */
 export type Shot = 'line' | 'cross' | 'tip' | 'over';
 export type Channel = 'line' | 'cross';
+/** The rule set a game is played under: a normal game, or advanced mode (`config.advanced`). */
+export type Rules = 'normal' | 'advanced';
 /** Where a serve is aimed: straight at one of the receivers, or the seam between them. */
 export type ServeTarget = Slot | 'seam';
 export type Stance = 'deep' | 'short';

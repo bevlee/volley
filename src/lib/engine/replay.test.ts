@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { fixedChoosers, randomChoosers, type Choosers } from './choosers';
-import { config } from './config';
+import { config, withRules } from './config';
 import { newGame, playGame, step } from './rally';
 import { recordGame, ReplayError, replayGame, replaySteps, rulesFingerprint, type GameRecord, type RecordedCall } from './replay';
 import { mulberry32, pick } from './rng';
+import { attackOptionsIn, blockModesIn } from './rules';
 import type { Game } from './types';
 
 /**
@@ -24,6 +25,34 @@ function playMixed(seed: number) {
 		stance: (g, team, rng) => (who().defence ? randomChoosers.stance(g, team, rng) : pick(player, ['deep', 'short'] as const))
 	};
 	return { game: playGame(newGame(seed), choosers), byComputer };
+}
+
+/**
+ * The same in advanced mode: the player also picks a touch the set leaves on, and against a high
+ * ball whether to block or stay down.
+ */
+function playMixedAdvanced(seed: number) {
+	const player = mulberry32(seed * 7919);
+	const byComputer: RecordedCall['byComputer'][] = [];
+	const who = () => byComputer.at(-1)!;
+	const choosers: Choosers = {
+		shot: (g, team, rng) => {
+			byComputer.push({ shot: player.next() < 0.5, defence: player.next() < 0.5 });
+			return who().shot ? randomChoosers.shot(g, team, rng) : pick(player, [...new Set(attackOptionsIn(g).map((o) => o.shot))]);
+		},
+		block: (g, team, rng) => (who().defence ? randomChoosers.block(g, team, rng) : pick(player, ['line', 'cross'] as const)),
+		stance: (g, team, rng) => (who().defence ? randomChoosers.stance(g, team, rng) : pick(player, ['deep', 'short'] as const)),
+		touch: (g, team, rng) => {
+			if (who().shot) return randomChoosers.touch!(g, team, rng);
+			const shot = g.attack!.calls!.shot;
+			return pick(player, attackOptionsIn(g).flatMap((o) => (o.shot === shot && o.touch ? [o.touch] : [])));
+		},
+		blockMode: (g, team, rng) => (who().defence ? randomChoosers.blockMode!(g, team, rng) : pick(player, blockModesIn(g)))
+	};
+	return withRules('advanced', () => {
+		const game = playGame(newGame(seed), choosers);
+		return { game, record: recordGame(game, byComputer) };
+	});
 }
 
 const states = (record: GameRecord) => [...replaySteps(record)];
@@ -98,20 +127,69 @@ describe('replay', () => {
 	});
 });
 
+describe('replaying an advanced game', () => {
+	it('records the rules, touches and stay-downs, and replays exactly under them whatever rules are in play', () => {
+		for (let seed = 1; seed <= 100; seed++) {
+			const { game, record } = playMixedAdvanced(seed);
+			expect(record.rules).toBe('advanced');
+			expect(config.advanced).toBe(false);
+			expect(replayGame(record)).toEqual(game);
+			expect(states(record).at(-1)).toEqual(game);
+			expect(config.advanced).toBe(false);
+		}
+		const { record } = playMixedAdvanced(1);
+		expect(record.calls.some((c) => c.touch === 'tip')).toBe(true);
+		expect(record.calls.some((c) => c.blockMode === 'none')).toBe(true);
+	});
+
+	it("doesn't replay under normal rules", () => {
+		const { record } = playMixedAdvanced(2);
+		expect(() => replayGame({ ...record, rules: 'normal' })).toThrow(ReplayError);
+	});
+
+	it('catches a touch that was changed', () => {
+		const { record } = playMixedAdvanced(3);
+		const call = record.calls.find((c) => c.byComputer.shot && c.touch === 'roll')!;
+		call.touch = 'tip';
+		expect(() => replayGame(record)).toThrow(/the computer's touch replays as roll/);
+	});
+
+	it('records normal games as normal, with no touches', () => {
+		const { game, byComputer } = playMixed(1);
+		const record = recordGame(game, byComputer);
+		expect(record.rules).toBe('normal');
+		expect(record.calls.every((c) => c.touch === undefined && c.blockMode === undefined)).toBe(true);
+	});
+});
+
 describe('rulesFingerprint', () => {
+	it('is its own for each rule set, and tuning advanced mode leaves the normal one alone', () => {
+		const normal = rulesFingerprint('normal', 10);
+		const advanced = rulesFingerprint('advanced', 10);
+		expect(advanced).not.toBe(normal);
+		const bonus = config.tempoDig.read.bonus;
+		try {
+			config.tempoDig.read.bonus = bonus + 1;
+			expect(rulesFingerprint('advanced', 10)).not.toBe(advanced);
+			expect(rulesFingerprint('normal', 10)).toBe(normal);
+		} finally {
+			config.tempoDig.read.bonus = bonus;
+		}
+	});
+
 	it('is the same every time', () => {
-		expect(rulesFingerprint(10)).toBe(rulesFingerprint(10));
+		expect(rulesFingerprint('normal', 10)).toBe(rulesFingerprint('normal', 10));
 	});
 
 	it('changes when a balance number changes', () => {
-		const before = rulesFingerprint(10);
+		const before = rulesFingerprint('normal', 10);
 		const bonus = config.blockBonus;
 		try {
 			config.blockBonus = bonus + 1;
-			expect(rulesFingerprint(10)).not.toBe(before);
+			expect(rulesFingerprint('normal', 10)).not.toBe(before);
 		} finally {
 			config.blockBonus = bonus;
 		}
-		expect(rulesFingerprint(10)).toBe(before);
+		expect(rulesFingerprint('normal', 10)).toBe(before);
 	});
 });

@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server, type Socket } from 'socket.io';
-import { FINGERPRINT, VERSION } from './build';
+import { FINGERPRINTS, VERSION } from './build';
 import {
 	act,
 	connect,
@@ -82,7 +82,7 @@ export function attachSockets(http: HttpServer, { store, now = Date.now, sweepMs
 		if (!s) return;
 		store()
 			.then((st) =>
-				st.save({ mode: 'online', version: VERSION, fingerprint: FINGERPRINT, record: s.record, players: s.players, names: s.names, score: s.score, winner: s.winner })
+				st.save({ mode: 'online', version: VERSION, fingerprint: FINGERPRINTS[s.record.rules], record: s.record, players: s.players, names: s.names, score: s.score, winner: s.winner })
 			)
 			.then((id) => rooms.has(room.code) && deliver(room, saved(room, id)))
 			.catch((e) => console.error(`Couldn't save the game in room ${room.code}`, e));

@@ -1,8 +1,12 @@
 import pkg from '../../../package.json' with { type: 'json' };
 import { rulesFingerprint } from '../engine/replay';
+import type { Rules } from '../engine/types';
 
 /** The app version saved with each game, for display. */
 export const VERSION: string = pkg.version;
 
-/** This build's rules fingerprint: saved with each game, and games under any other one are deleted. Takes about 70 ms. */
-export const FINGERPRINT = rulesFingerprint();
+/** This build's fingerprint for each rule set, saved with each game played under it. Takes about 150 ms. */
+export const FINGERPRINTS: Record<Rules, string> = { normal: rulesFingerprint('normal'), advanced: rulesFingerprint('advanced') };
+
+/** The fingerprints a saved game can have and still replay; games under any other are deleted. */
+export const CURRENT: readonly string[] = Object.values(FINGERPRINTS);

@@ -1,4 +1,4 @@
-import type { Channel, ReadOutcome, Shot, Slot, Tempo, Touch } from './types';
+import type { Channel, ReadOutcome, Rules, Shot, Slot, Tempo, Touch } from './types';
 
 export const config = {
 	/** Short games: first to 7, win by 2. */
@@ -148,3 +148,17 @@ export const config = {
 		settersTouchFrom: 4
 	}
 };
+
+/** The rules in play now. */
+export const rulesInPlay = (): Rules => (config.advanced ? 'advanced' : 'normal');
+
+/** Runs `play` under `rules`, then puts back the rules that were in play. */
+export function withRules<T>(rules: Rules, play: () => T): T {
+	const before = config.advanced;
+	config.advanced = rules === 'advanced';
+	try {
+		return play();
+	} finally {
+		config.advanced = before;
+	}
+}

@@ -1,6 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import { ReplayError, replayGame } from '#lib/engine/replay.ts';
-import { FINGERPRINT, VERSION } from '#lib/server/build.ts';
+import { CURRENT, FINGERPRINTS, VERSION } from '#lib/server/build.ts';
 import { getStore } from '#lib/server/store.ts';
 import { isPlayerId, MAX_UPLOAD_BYTES, parseUpload, rateLimiter } from '#lib/server/uploads.ts';
 import { summary } from './summary.ts';
@@ -16,8 +16,8 @@ export const GET: RequestHandler = async ({ url }) => {
 	const beforeParam = url.searchParams.get('before');
 	const before = beforeParam ? new Date(beforeParam) : undefined;
 	if (before && Number.isNaN(before.getTime())) error(400, 'Bad before');
-	const store = await getStore(FINGERPRINT);
-	const games = await store.byPlayer(player, FINGERPRINT, PAGE, before);
+	const store = await getStore(CURRENT);
+	const games = await store.byPlayer(player, CURRENT, PAGE, before);
 	return json({ games: games.map((g) => summary(g, player)), more: games.length === PAGE });
 };
 
@@ -37,7 +37,8 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 	}
 	const upload = parseUpload(body);
 	if (typeof upload === 'string') error(400, upload);
-	if (upload.fingerprint !== FINGERPRINT) error(409, 'The rules have changed since this game was played; reload the page');
+	const fingerprint = FINGERPRINTS[upload.record.rules];
+	if (upload.fingerprint !== fingerprint) error(409, 'The rules have changed since this game was played; reload the page');
 	let final;
 	try {
 		final = replayGame(upload.record);
@@ -45,11 +46,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 		if (e instanceof ReplayError) error(400, `The game doesn't replay: ${e.message}`);
 		throw e;
 	}
-	const store = await getStore(FINGERPRINT);
+	const store = await getStore(CURRENT);
 	const id = await store.save({
 		mode: 'computer',
 		version: VERSION,
-		fingerprint: FINGERPRINT,
+		fingerprint,
 		record: upload.record,
 		players: upload.team === 'A' ? { A: upload.playerId, B: null } : { A: null, B: upload.playerId },
 		names: upload.team === 'A' ? { A: upload.name, B: null } : { A: null, B: upload.name },

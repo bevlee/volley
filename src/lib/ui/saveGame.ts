@@ -1,21 +1,22 @@
 import { rulesFingerprint } from '../engine/replay';
-import type { Game, TeamId } from '../engine/types';
+import type { Game, Rules, TeamId } from '../engine/types';
 import { playerId, savedName } from '../online/identity';
 import { recordVsComputer, type CallMakers } from './record';
 
 /** Where a finished game's save has got to, for the line under the court at game over. */
 export type SaveState = { kind: 'saving' } | { kind: 'saved'; id: string } | { kind: 'failed'; message: string };
 
-/** Worked out on the first save (about 70 ms); the server refuses games played under other rules. */
-let fingerprint: string | undefined;
+/** Worked out on the first save under each rule set (about 70 ms); the server refuses games played under other rules. */
+const fingerprints: Partial<Record<Rules, string>> = {};
 
 /**
  * Uploads a finished game against the computer, for the player's history and its replay. The
  * server replays the record with its own engine and keeps its own result.
  */
 export async function saveVsComputer(g: Game, makers: CallMakers, team: TeamId): Promise<SaveState> {
-	fingerprint ??= rulesFingerprint();
-	const body = { ...recordVsComputer(g, makers), fingerprint, playerId: playerId(), team, name: savedName() || null };
+	const record = recordVsComputer(g, makers);
+	const fingerprint = (fingerprints[record.rules] ??= rulesFingerprint(record.rules));
+	const body = { ...record, fingerprint, playerId: playerId(), team, name: savedName() || null };
 	try {
 		const res = await fetch('/api/games', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 		if (res.ok) return { kind: 'saved', id: (await res.json()).id };

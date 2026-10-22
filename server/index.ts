@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 // @ts-expect-error: built by `npm run build`; adapter-node ships no types for it.
 import { handler } from '../build/handler.js';
-import { FINGERPRINT } from '../src/lib/server/build';
+import { CURRENT } from '../src/lib/server/build';
 import { attachSockets } from '../src/lib/server/sockets';
 import { getStore } from '../src/lib/server/store';
 
@@ -9,7 +9,7 @@ import { getStore } from '../src/lib/server/store';
  * Production: SvelteKit's pages, API and static files, and the game's sockets, on one port.
  * The store connects (and migrates, and drops games from old rules) before anything is served.
  */
-const store = await getStore(FINGERPRINT);
+const store = await getStore(CURRENT);
 const http = createServer(handler);
 const sockets = attachSockets(http, { store: async () => store });
 const port = Number(process.env.PORT ?? 8080);
