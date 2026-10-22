@@ -438,9 +438,11 @@ function sampledPlayers(model: Model, rollouts: number) {
 	};
 }
 
+/** Calls at random: each call open is as likely as any other. */
+const random: Player = { attack: (c) => uniform(c.attacks.length), defence: (c) => uniform(c.defences.length) };
+
 /** The players the lookahead offers, off exact tables whose rest of the rally is played at random, and the true equilibrium. */
 function players(model: Model) {
-	const random: Player = { attack: (c) => uniform(c.attacks.length), defence: (c) => uniform(c.defences.length) };
 	const atRandom = evaluate(model, { A: random, B: random });
 	const tables = new Map(model.calls.map((call) => [call, table(call, atRandom)]));
 	const solved = new Map(model.calls.map((call) => [call, solve(tables.get(call)!)]));
@@ -455,7 +457,6 @@ function players(model: Model) {
 	const eqSolved = new Map(model.calls.map((call) => [call, solve(table(call, eqValues))]));
 	const eq: Player = { attack: (c) => eqSolved.get(c)!.attack, defence: (c) => eqSolved.get(c)!.defence };
 	return {
-		random,
 		mixed,
 		smart,
 		reader,
@@ -500,7 +501,6 @@ const per100 = (x: number) => (100 * x).toFixed(1);
 
 /** What `sim:tempo` measures with the lookahead's own (sampled) players: the same numbers, less its game-to-game noise. */
 function sampledSummary(model: Model, rollouts: number) {
-	const random = players(model).random;
 	const s = sampledPlayers(model, rollouts);
 	const vsRandom = matchup(model, s.mixed, random);
 	const balanced = visits(model, { A: s.mixed, B: s.mixed });
@@ -521,8 +521,9 @@ function sampledSummary(model: Model, rollouts: number) {
 function summary(model: Model) {
 	const p = players(model);
 	const balanced = visits(model, { A: p.mixed, B: p.mixed });
-	const vsRandom = matchup(model, p.mixed, p.random);
+	const vsRandom = matchup(model, p.mixed, random);
 	const v = evaluate(model, { A: p.mixed, B: p.mixed });
+	const picked = picks(model, p.solved, balanced.perCall);
 	return {
 		row: {
 			'quick kills': pct(balanced.kills.quick.kills / balanced.kills.quick.n),
@@ -531,14 +532,12 @@ function summary(model: Model) {
 			"A's games": pct(game(v[model.receives.A], v[model.receives.B]).win),
 			'mixed vs random: games': pct(vsRandom.games),
 			'· points': pct(vsRandom.points),
-			'mixed defence: points': pct(matchup(model, p.mixedDefence, p.random).points),
-			'mixed attack: points': pct(matchup(model, p.mixedAttack, p.random).points),
+			'mixed defence: points': pct(matchup(model, p.mixedDefence, random).points),
+			'mixed attack: points': pct(matchup(model, p.mixedAttack, random).points),
 			'reader vs smart: points': pct(matchup(model, p.reader, p.smart).points),
-			'smart vs random: points': pct(matchup(model, p.smart, p.random).points),
-			'eq vs random: points': pct(matchup(model, p.eq, p.random).points),
-			picks: ['hard', 'tip', 'roll', 'deep', 'short', 'down']
-				.map((k) => `${k} ${Math.round(100 * (picks(model, p.solved, balanced.perCall).get(k)?.picked ?? 0))}`)
-				.join(' ')
+			'smart vs random: points': pct(matchup(model, p.smart, random).points),
+			'eq vs random: points': pct(matchup(model, p.eq, random).points),
+			picks: ['hard', 'tip', 'roll', 'deep', 'short', 'down'].map((k) => `${k} ${Math.round(100 * (picked.get(k)?.picked ?? 0))}`).join(' ')
 		},
 		players: p,
 		balanced
@@ -768,12 +767,11 @@ for (const [name, apply] of runs) {
 	if (flag('tables')) tables(model, s, flag('tables')!.split('=')[1]);
 	if (sampled) sampledResults[name] = sampledSummary(model, sampled);
 }
-if (flag('compact'))
-	for (const [name, r] of Object.entries(results))
-		console.log(
-			[name.padEnd(34), r['· points'], r['mixed vs random: games'], r['mixed defence: points'], r["A's games"], r['past one attack'], r['quick kills'], r.picks].join(' | ')
-		);
-else console.table(results);
+if (flag('compact')) {
+	const columns = ['· points', 'mixed vs random: games', 'mixed defence: points', "A's games", 'past one attack', 'quick kills', 'picks'];
+	console.log(['variant'.padEnd(34), 'balanced vs random: points', 'games', 'defence alone', "A's games", 'past one attack', 'quick kills', 'balanced picks'].join(' | '));
+	for (const [name, r] of Object.entries(results)) console.log([name.padEnd(34), ...columns.map((c) => r[c])].join(' | '));
+} else console.table(results);
 if (sampled) {
 	console.log(`The lookahead's own players (${sampled} rollouts per cell), as sim:tempo plays them`);
 	console.table(sampledResults);
