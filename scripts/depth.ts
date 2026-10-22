@@ -29,7 +29,10 @@ import type { BlockMode, Channel, Game, Phase, Stance, TeamId } from '../src/lib
  * The noise makes them play more like smart, so against random they do better than balanced.
  * --control checks the enumeration against seeded engine hits.
  *
- *   npm run sim:depth -- [--detail] [--control] [--sampled[=40]] [variant names...]
+ * A variant name can carry config changes as JSON, merged in after the variant's own:
+ * 'advanced+{"stayDown":false}'.
+ *
+ *   npm run sim:depth -- [--detail] [--tables=<hitter>] [--control] [--sampled[=40]] [--compact] [variants...]
  */
 
 /** Where a side gets the ball before its set: a free ball, or a dig or block touch and its die. */
@@ -464,6 +467,34 @@ function players(model: Model) {
 	};
 }
 
+/**
+ * How often balanced play picks each kind of call (a touch, a stance, staying down), as a share of
+ * the calls where it's open, and how often it's open. An option it never picks anywhere is dead weight.
+ */
+function picks(model: Model, solved: Map<Call, { attack: Mix; defence: Mix }>, perCall: Float64Array) {
+	const kinds = new Map<string, { picked: number; open: number }>();
+	const kind = (label: string) => (label.startsWith('down') ? 'down' : label.replace(/^(line|cross) /, ''));
+	const total = perCall.reduce((a, b) => a + b, 0);
+	model.calls.forEach((call, c) => {
+		const w = perCall[c];
+		const { attack, defence } = solved.get(call)!;
+		for (const [labels, mix] of [
+			[call.attacks, attack],
+			[call.defences, defence]
+		] as const) {
+			const here = new Map<string, number>();
+			labels.forEach((l, i) => here.set(kind(l), (here.get(kind(l)) ?? 0) + mix[i]));
+			for (const [k, x] of here) {
+				const row = kinds.get(k) ?? { picked: 0, open: 0 };
+				row.picked += w * x;
+				row.open += w;
+				kinds.set(k, row);
+			}
+		}
+	});
+	return new Map([...kinds].map(([k, { picked, open }]) => [k, { picked: picked / open, open: open / total }]));
+}
+
 const pct = (x: number) => `${(100 * x).toFixed(1)}%`;
 const per100 = (x: number) => (100 * x).toFixed(1);
 
@@ -504,7 +535,10 @@ function summary(model: Model) {
 			'mixed attack: points': pct(matchup(model, p.mixedAttack, p.random).points),
 			'reader vs smart: points': pct(matchup(model, p.reader, p.smart).points),
 			'smart vs random: points': pct(matchup(model, p.smart, p.random).points),
-			'eq vs random: points': pct(matchup(model, p.eq, p.random).points)
+			'eq vs random: points': pct(matchup(model, p.eq, p.random).points),
+			picks: ['hard', 'tip', 'roll', 'deep', 'short', 'down']
+				.map((k) => `${k} ${Math.round(100 * (picks(model, p.solved, balanced.perCall).get(k)?.picked ?? 0))}`)
+				.join(' ')
 		},
 		players: p,
 		balanced
@@ -514,8 +548,9 @@ function summary(model: Model) {
 /**
  * Each call's table, grouped by who hits and off what set, weighted by how often balanced play
  * reaches it: the balanced value, the value when both call at random, what a random attacker and
- * a random defender each give up against the balanced side (in rallies per 100 attacks), and the
- * balanced mixes. Off the same tables as `mixed` (the rest of the rally at random).
+ * a random defender each give up against the balanced side, what the balanced attack and defence
+ * each gain against a random side (all in rallies per 100 attacks), and the balanced mixes. Off the
+ * same tables as `mixed` (the rest of the rally at random).
  */
 function detail(model: Model, { players: p, balanced }: ReturnType<typeof summary>) {
 	type Group = {
@@ -524,6 +559,8 @@ function detail(model: Model, { players: p, balanced }: ReturnType<typeof summar
 		uniform: number;
 		attackLoss: number;
 		defenceLoss: number;
+		attackGain: number;
+		defenceGain: number;
 		attack: Map<string, number>;
 		defence: Map<string, number>;
 		smart: Map<string, number>;
@@ -545,6 +582,8 @@ function detail(model: Model, { players: p, balanced }: ReturnType<typeof summar
 			uniform: 0,
 			attackLoss: 0,
 			defenceLoss: 0,
+			attackGain: 0,
+			defenceGain: 0,
 			attack: new Map(),
 			defence: new Map(),
 			smart: new Map()
@@ -554,6 +593,8 @@ function detail(model: Model, { players: p, balanced }: ReturnType<typeof summar
 		g.uniform += w * play(m, ua, ud);
 		g.attackLoss += w * (value - play(m, ua, defence));
 		g.defenceLoss += w * (play(m, attack, ud) - value);
+		g.attackGain += w * (play(m, attack, ud) - play(m, ua, ud));
+		g.defenceGain += w * (play(m, ua, ud) - play(m, ua, defence));
 		call.attacks.forEach((a, i) => add(g.attack, a, w * attack[i]));
 		call.defences.forEach((d, j) => add(g.defence, d, w * defence[j]));
 		add(g.smart, call.attacks[argmax(m.map(mean))], w);
@@ -576,6 +617,8 @@ function detail(model: Model, { players: p, balanced }: ReturnType<typeof summar
 						random: pct(g.uniform / g.weight),
 						'attack loses': per100(g.attackLoss / g.weight),
 						'defence loses': per100(g.defenceLoss / g.weight),
+						'attack gains': per100(g.attackGain / g.weight),
+						'defence gains': per100(g.defenceGain / g.weight),
 						'attack mix': mixText(g.attack, g.weight),
 						'defence mix': mixText(g.defence, g.weight),
 						'smart hits': mixText(g.smart, g.weight)
@@ -583,11 +626,37 @@ function detail(model: Model, { players: p, balanced }: ReturnType<typeof summar
 				])
 		)
 	);
+	console.log(
+		`Balanced picks, as a share of the calls where each is open: ${[...picks(model, p.solved, balanced.perCall)].map(([k, { picked, open }]) => `${k} ${pct(picked)} of ${pct(open)}`).join(' · ')}`
+	);
 	const all = [...groups.values()];
 	const sum = (f: (g: Group) => number) => all.reduce((s, g) => s + f(g), 0) / total;
 	console.log(
-		`All calls · balanced ${pct(sum((g) => g.eq))} · random ${pct(sum((g) => g.uniform))} · a random attack gives up ${per100(sum((g) => g.attackLoss))} and a random defence ${per100(sum((g) => g.defenceLoss))} rallies per 100 attacks\n`
+		`All calls · balanced ${pct(sum((g) => g.eq))} · random ${pct(sum((g) => g.uniform))} · against the balanced side a random attack gives up ${per100(sum((g) => g.attackLoss))} and a random defence ${per100(sum((g) => g.defenceLoss))} rallies per 100 attacks · against a random side the balanced attack gains ${per100(sum((g) => g.attackGain))} and the balanced defence ${per100(sum((g) => g.defenceGain))}\n`
 	);
+}
+
+/** The most visited table off each set for one hitter, with the balanced mixes in the margins (all in %). */
+function tables(model: Model, { players: p, balanced }: ReturnType<typeof summary>, hitter: string) {
+	const best = new Map<number, number>();
+	model.calls.forEach((call, c) => {
+		if (call.hitter !== hitter) return;
+		const known = best.get(call.setMod);
+		if (known === undefined || balanced.perCall[c] > balanced.perCall[known]) best.set(call.setMod, c);
+	});
+	for (const c of [...best.values()].sort((a, b) => model.calls[b].setMod - model.calls[a].setMod)) {
+		const call = model.calls[c];
+		const m = p.tables.get(call)!;
+		const { value, attack, defence } = p.solved.get(call)!;
+		console.log(`${call.key} · balanced ${pct(value)}`);
+		const rows = Object.fromEntries(
+			call.attacks.map((a, i) => [
+				`${a} (${Math.round(100 * attack[i])})`,
+				Object.fromEntries(call.defences.map((d, j) => [`${d} (${Math.round(100 * defence[j])})`, Math.round(100 * m[i][j])]))
+			])
+		);
+		console.table(rows);
+	}
 }
 
 /**
@@ -626,9 +695,36 @@ function control(model: Model, runs = 20_000) {
 	console.log(`control: ${cells} cells, worst gap between enumeration and ${runs} seeded hits: ${worst.toFixed(2)} standard errors`);
 }
 
+/** Every touch hits and aims off the set once, as a swing does. */
+function likeASwing() {
+	const once = { set: 1, bonus: 0 };
+	config.touchPower = { hard: { ...once }, tip: { ...once }, roll: { ...once } };
+	config.touchAim = { hard: { ...once }, tip: { ...once }, roll: { ...once } };
+}
+
+/** Advanced mode as first built: touches like a swing, no hard hits below a −2 set, no staying down, a read worth 3. */
+function firstBuilt() {
+	likeASwing();
+	config.highBallMinSet = { line: { hard: -2, tip: null, roll: null }, cross: { hard: -2, tip: null, roll: null } };
+	config.stayDown = false;
+	config.tempoDig.read.bonus = 3;
+}
+
+/** Today's game, advanced mode as first built and as it is, and each of its rules taken back out on its own. */
 const variants: [string, () => void][] = [
 	['today', () => (config.advanced = false)],
-	['default', () => {}]
+	['first built', firstBuilt],
+	['advanced', () => {}],
+	['touches hit like a swing', likeASwing],
+	['tips hit like a swing', () => (config.touchPower.tip = { set: 1, bonus: 0 })],
+	['rolls hit like a swing', () => ((config.touchPower.roll = { set: 1, bonus: 0 }), (config.touchAim.roll = { set: 1, bonus: 0 }))],
+	['rolls aim like a tip', () => (config.touchAim.roll = { set: 1, bonus: 0 })],
+	['hard hits take the set once', () => (config.touchPower.hard = { set: 1, bonus: 0 })],
+	['no hard hits below −2', () => (config.highBallMinSet = { line: { hard: -2, tip: null, roll: null }, cross: { hard: -2, tip: null, roll: null } })],
+	['no staying down', () => (config.stayDown = false)],
+	['a read worth 3', () => (config.tempoDig.read.bonus = 3)],
+	['tips 5 softer', () => (config.touchPower.tip.bonus = -5)],
+	['tips 3 softer', () => (config.touchPower.tip.bonus = -3)]
 ];
 
 const args = process.argv.slice(2);
@@ -637,10 +733,26 @@ const sampled = flag('sampled') && Number(flag('sampled')!.split('=')[1] ?? 40);
 const only = args.filter((a) => !a.startsWith('--'));
 const defaults = structuredClone(config);
 const lineup = structuredClone(LINEUP);
+/** Deep-merges `patch` into `target`: how a `variant+{json}` argument changes config on top of the variant. */
+function merge(target: Record<string, unknown>, patch: Record<string, unknown>) {
+	for (const [k, v] of Object.entries(patch)) {
+		if (!(k in target)) throw new Error(`config has no ${k}`);
+		if (v && typeof v === 'object' && !Array.isArray(v)) merge(target[k] as Record<string, unknown>, v as Record<string, unknown>);
+		else target[k] = v;
+	}
+}
+const named = new Map(variants);
+const runs: [string, () => void][] = only.length
+	? only.map((arg) => {
+			const [name, json] = arg.split(/\+(?=\{)/);
+			const apply = named.get(name);
+			if (!apply) throw new Error(`no variant ${name}`);
+			return [arg, () => (apply(), json && merge(config as unknown as Record<string, unknown>, JSON.parse(json)))];
+		})
+	: variants;
 const results: Record<string, Record<string, string>> = {};
 const sampledResults: Record<string, Record<string, string>> = {};
-for (const [name, apply] of variants) {
-	if (only.length && !only.includes(name)) continue;
+for (const [name, apply] of runs) {
 	Object.assign(config, structuredClone(defaults), { advanced: true });
 	Object.assign(LINEUP, structuredClone(lineup));
 	apply();
@@ -653,9 +765,15 @@ for (const [name, apply] of variants) {
 		detail(model, s);
 	}
 	if (flag('control')) control(model);
+	if (flag('tables')) tables(model, s, flag('tables')!.split('=')[1]);
 	if (sampled) sampledResults[name] = sampledSummary(model, sampled);
 }
-console.table(results);
+if (flag('compact'))
+	for (const [name, r] of Object.entries(results))
+		console.log(
+			[name.padEnd(34), r['· points'], r['mixed vs random: games'], r['mixed defence: points'], r["A's games"], r['past one attack'], r['quick kills'], r.picks].join(' | ')
+		);
+else console.table(results);
 if (sampled) {
 	console.log(`The lookahead's own players (${sampled} rollouts per cell), as sim:tempo plays them`);
 	console.table(sampledResults);
