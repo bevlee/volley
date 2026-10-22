@@ -3,7 +3,7 @@ import { config } from './config';
 import { LINEUP, type Lineup } from './lineup';
 import { d6, mulberry32, pick, type Rng, type SeededRng } from './rng';
 import * as rules from './rules';
-import type { Game, LogEntry, Player, PointKind, RollLabel, Slot, Team, TeamId } from './types';
+import type { BlockMode, Game, LogEntry, Player, PointKind, RollLabel, Slot, Team, TeamId, Zone } from './types';
 
 export const other = (team: TeamId): TeamId => (team === 'A' ? 'B' : 'A');
 export const partner = (slot: Slot): Slot => (slot === 'blocker' ? 'defender' : 'blocker');
@@ -117,6 +117,13 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 		});
 		if (rules.isShank(a.firstDie, die)) return scorePoint(g, other(a.team), 'shank', 'two natural 1s');
 		charge(a.team, partner(a.hitter), rules.setPips(a.setMod), 'Great set');
+		const tempo = rules.tempoIn(g);
+		if (tempo)
+			log(tempo === 'fast' ? 'Quick ball · swing now, the defender has no time' : 'High ball · time to place it', 'tempo', {
+				team: a.team,
+				tempo,
+				mod: a.setMod
+			});
 		g.phase = { kind: 'calls' };
 	};
 
@@ -185,7 +192,7 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				team: other(dug.team),
 				hitter: 'defender',
 				source: 'dig',
-				dugAt: rules.defenderZone(dug.calls!.stance, dug.calls!.block),
+				dugAt: rules.defenderAt(dug.calls!),
 				firstDie: die,
 				// Libero instincts: a dig that comes up sets up a better attack.
 				firstMod: rules.firstTouch(
@@ -226,9 +233,12 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				block: choosers.block(g, defending, rng),
 				stance: choosers.stance(g, defending, rng)
 			};
-			if (config.blockModes) {
-				a.calls.tempo = (choosers.tempo ?? randomChoosers.tempo!)(g, a.team, rng);
-				a.calls.blockMode = (choosers.blockMode ?? randomChoosers.blockMode!)(g, defending, rng);
+			if (config.blockModes) a.calls.tempo = (choosers.tempo ?? randomChoosers.tempo!)(g, a.team, rng);
+			if (rules.blockModesIn(g).length) a.calls.blockMode = (choosers.blockMode ?? randomChoosers.blockMode!)(g, defending, rng);
+			const tempo = rules.tempoIn(g);
+			if (tempo) {
+				a.calls.tempo = tempo;
+				a.calls.touch = (choosers.touch ?? randomChoosers.touch!)(g, a.team, rng);
 			}
 			// The hitter can spend one of their charges on the hit, and the blocker or digger one of theirs.
 			// It's gone once called, whether or not it comes into play.
@@ -248,12 +258,16 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				}
 			}
 			const open = rules.attackOptionsIn(g);
-			if (!open.some((o) => o.shot === a.calls!.shot && (!o.tempo || !a.calls!.tempo || o.tempo === a.calls!.tempo)))
-				throw new Error(`${a.calls.tempo ? `${a.calls.tempo} ` : ''}${a.calls.shot} isn't on off a ${signed(a.setMod!)} set`);
-			if (a.calls.blockMode && !rules.blockModesFor(g.teams[defending].blocker).includes(a.calls.blockMode))
+			const { shot, touch } = a.calls;
+			if (!open.some((o) => o.shot === shot && o.touch === touch && (!o.tempo || !a.calls!.tempo || o.tempo === a.calls!.tempo)))
+				throw new Error(`${a.calls.tempo ? `${a.calls.tempo} ` : ''}${shot}${touch ? ` ${touch}` : ''} isn't on off a ${signed(a.setMod!)} set`);
+			if (a.calls.blockMode && !rules.blockModesIn(g).includes(a.calls.blockMode))
 				throw new Error(`${g.teams[defending].blocker.name} can't ${a.calls.blockMode}`);
+			const attackText = touch ? `${tempo === 'fast' ? 'quick' : 'high'} ${shot} ${touch}` : shot;
+			const stayDown = touch && a.calls.blockMode === 'none';
+			const stanceText = tempo === 'fast' || stayDown ? '' : `, defender ${a.calls.stance}`;
 			log(
-				`Calls · ${a.team} ${a.calls.shot}${a.calls.special ? ' (special)' : ''} · ${defending} blocks ${a.calls.block}, defender ${a.calls.stance}${a.calls.defenceSpecial ? ` (special ${a.calls.defenceSpecial})` : ''}`,
+				`Calls · ${a.team} ${attackText}${a.calls.special ? ' (special)' : ''} · ${defending} ${stayDown ? 'stays down' : `blocks ${a.calls.block}`}${stanceText}${a.calls.defenceSpecial ? ` (special ${a.calls.defenceSpecial})` : ''}`,
 				'calls',
 				{
 					...a.calls,
@@ -275,6 +289,8 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const team = g.teams[a.team];
 			const hitter = team[a.hitter];
 			const setter = team[partner(a.hitter)];
+			const target = rules.targetOf(calls);
+			const quick = calls.touch !== undefined && calls.tempo === 'fast';
 
 			const powerDie = roll(a.team, a.hitter, 'power');
 			a.powerDie = powerDie;
@@ -287,18 +303,19 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			if (!over && rules.isGuaranteedKill(a.setDie!, powerDie)) {
 				log(`${hitter.name} swings · d6 6`, 'swing', { player: hitter.name, team: a.team, slot: a.hitter, shot: calls.shot, die: 6 });
 				// No aim roll: an unstoppable hit lands where it was called.
-				a.landing = rules.TARGET[calls.shot];
+				a.landing = target;
 				return scorePoint(g, a.team, 'guaranteed kill', '6 on the set, 6 on the hit');
 			}
 
 			const special = calls.special ? config.specialHitPower : 0;
-			const hard = !rules.isSoft(calls.shot);
+			const hard = !rules.isSoft(calls.touch ?? calls.shot);
 			const heavy = hard && rules.has(hitter, 'heavyHitter');
 			const lineBoost =
 				(calls.shot === 'line' && rules.has(hitter, 'lineSpecialist') ? config.abilities.lineSpecialistPower : 0) +
 				(calls.tempo === 'fast' && rules.has(hitter, 'quick') ? config.abilities.quickPower : 0);
+			const setPower = calls.touch ? rules.touchSet(calls.touch, setMod) : setMod;
 			const power =
-				rules.power(hitter.attack, powerDie, setMod) + special + (heavy ? config.abilities.heavyHitterPower : 0) + lineBoost;
+				rules.power(hitter.attack, powerDie, setPower) + special + (heavy ? config.abilities.heavyHitterPower : 0) + lineBoost;
 			const hitData = () => ({
 				team: a.team,
 				slot: a.hitter,
@@ -306,16 +323,66 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				shot: calls.shot,
 				attack: a.incoming!
 			});
-			const powerText = `${hitter.attack} + ${powerDie}${plus(setMod)}${special ? ` + ${special} special` : ''}${heavy ? ` + ${config.abilities.heavyHitterPower} heavy` : ''}${lineBoost ? ` + ${lineBoost} ability` : ''} = ${power}`;
+			const powerText = `${hitter.attack} + ${powerDie}${plus(setPower)}${special ? ` + ${special} special` : ''}${heavy ? ` + ${config.abilities.heavyHitterPower} heavy` : ''}${lineBoost ? ` + ${lineBoost} ability` : ''} = ${power}`;
 			if (over) {
 				a.incoming = config.overPower + powerDie;
 				log(`${hitter.name} digs it over deep · ${config.overPower} + ${powerDie} = ${a.incoming}`, 'hit', hitData());
-			} else if (calls.shot === 'tip') {
+			} else if (!hard) {
 				a.incoming = power;
-				log(`${hitter.name} tips · ${powerText}`, 'hit', hitData());
+				log(`${hitter.name} ${calls.touch === 'roll' ? 'rolls' : 'tips'}${calls.touch ? ` ${calls.shot}` : ''} · ${powerText}`, 'hit', hitData());
 			} else {
 				a.incoming = rules.teamAttack(power, setter.attack, a.setDie!);
 				log(`${hitter.name} hits ${calls.shot} · ${powerText}, team ${a.incoming}`, 'hit', hitData());
+			}
+
+			const defending = other(a.team);
+			const { blocker, defender } = g.teams[defending];
+			/** The block roll. True when it ends the attack: a stuff scores, and a touch is the blocking side's first contact. */
+			const blocks = (base: number, mode: BlockMode, intoBlock: boolean): boolean => {
+				const die = roll(defending, 'blocker', 'block');
+				// Wall commits harder.
+				const bonus =
+					base +
+					(mode === 'commit' && rules.has(blocker, 'wall') ? config.abilities.wallBlock : 0) +
+					(calls.defenceSpecial === 'block' ? config.specialBlock : 0);
+				const total = blocker.defense + die + bonus;
+				const result = rules.blockResult(total, a.incoming!);
+				log(
+					`${blocker.name} blocks · ${blocker.defense} + ${die} + ${bonus} = ${total} vs ${a.incoming} → ${result}`,
+					'block',
+					{ result, total, attack: a.incoming!, player: blocker.name, team: defending, intoBlock, mode }
+				);
+				if (result === 'stuff') {
+					scorePoint(g, defending, 'stuff', `block ${total} vs ${a.incoming}`);
+					return true;
+				}
+				if (result === 'clean') return false;
+				// Tool the block: the hitter goes off the hands and out.
+				if (rules.has(hitter, 'toolTheBlock')) {
+					const tool = roll(a.team, a.hitter, 'tool');
+					const out = tool >= config.abilities.toolTheBlockOn;
+					log(`${hitter.name} goes for the hands · d6 ${tool} → ${out ? 'off the block and out' : 'stays in'}`, 'tool', {
+						die: tool,
+						out,
+						player: hitter.name,
+						team: a.team
+					});
+					if (out) {
+						scorePoint(g, a.team, 'kill', `off ${blocker.name}'s hands`);
+						return true;
+					}
+				}
+				a.blockDie = die;
+				g.phase = { kind: 'touched' };
+				return true;
+			};
+
+			// A quick ball beats the defender and leaves no time to aim: the block stops it or it's down.
+			if (quick) {
+				a.landing = target;
+				if (calls.block !== calls.shot) return scorePoint(g, a.team, 'kill', `quick ${calls.shot}, the block went ${calls.block}`);
+				if (!blocks(config.quickBlockBonus, 'commit', false)) scorePoint(g, a.team, 'kill', `${a.incoming} clean past the block`);
+				return;
 			}
 
 			const accDie = roll(a.team, a.hitter, 'aim');
@@ -324,13 +391,16 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const specialAim = calls.special ? config.specialHitAccuracy : 0;
 			// Abilities: Heavy hitter aims worse.
 			const abilityAim = heavy ? config.abilities.heavyHitterAim : 0;
-			a.accuracy = rules.accuracy(accDie, a.firstMod, setMod, setter.attack) + tempoMod + specialAim + abilityAim;
-			const accText = `Accuracy ${accDie}${plus(a.firstMod)}${plus(setMod)} + ${setter.attack}${tempoMod ? `${plus(tempoMod)} fast` : ''}${specialAim ? ` + ${specialAim} special` : ''}${abilityAim ? `${plus(abilityAim)} ability` : ''} = ${a.accuracy}`;
-			const defenderAt = rules.defenderZone(calls.stance, calls.block);
-			const where = rules.landing(calls.shot, a.accuracy, defenderAt, (zones) => pick(rng, zones));
-			a.aim = rules.aimResult(calls.shot, a.accuracy);
+			const setAim = calls.touch ? rules.touchAim(calls.touch, setMod) : setMod;
+			a.accuracy = rules.accuracy(accDie, a.firstMod, setAim, setter.attack) + tempoMod + specialAim + abilityAim;
+			const accText = `Accuracy ${accDie}${plus(a.firstMod)}${plus(setAim)} + ${setter.attack}${tempoMod ? `${plus(tempoMod)} fast` : ''}${specialAim ? ` + ${specialAim} special` : ''}${abilityAim ? `${plus(abilityAim)} ability` : ''} = ${a.accuracy}`;
+			const tie = (zones: Zone[]) => pick(rng, zones);
+			const where = calls.touch
+				? rules.advancedLanding(calls, a.accuracy, tie)
+				: rules.landing(calls.shot, a.accuracy, rules.defenderAt(calls), tie);
+			a.aim = rules.aimResult(calls.touch ?? calls.shot, a.accuracy);
 			if (where === 'easy') {
-				log(`${accText} → easy ball`, 'accuracy', { result: 'easy', target: rules.TARGET[calls.shot] });
+				log(`${accText} → easy ball`, 'accuracy', { result: 'easy', target });
 				return freeBallTo(g, other(a.team));
 			}
 			a.landing = where;
@@ -338,12 +408,10 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			log(`${accText} → ${AIM_TEXT[a.aim as keyof typeof AIM_TEXT]}, zone ${where}`, 'accuracy', {
 				result: a.aim,
 				zone: where,
-				target: rules.TARGET[calls.shot]
+				target
 			});
 
 			// The blocker and defender roll in the same step as the attackers.
-			const defending = other(a.team);
-			const { blocker, defender } = g.teams[defending];
 			// The block is in play when the shot went down the blocker's channel, or was aimed into the block.
 			// A reading blocker might also get across to the other channel, but late, with less over the net.
 			const mode = calls.blockMode ?? 'commit';
@@ -359,56 +427,26 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 					team: defending
 				});
 			}
-			if (blocking) {
-				const die = roll(defending, 'blocker', 'block');
-				// A read block is late, with less over the net. Wall commits harder.
-				const bonus =
-					(mode === 'read' ? config.readBlockBonus : config.blockBonus) +
-					(mode === 'commit' && rules.has(blocker, 'wall') ? config.abilities.wallBlock : 0) +
-					(calls.defenceSpecial === 'block' ? config.specialBlock : 0);
-				const total = blocker.defense + die + bonus;
-				const result = rules.blockResult(total, a.incoming!);
-				log(
-					`${blocker.name} blocks · ${blocker.defense} + ${die} + ${bonus} = ${total} vs ${a.incoming} → ${result}`,
-					'block',
-					{ result, total, attack: a.incoming!, player: blocker.name, team: defending, intoBlock, mode }
-				);
-				if (result === 'stuff') return scorePoint(g, defending, 'stuff', `block ${total} vs ${a.incoming}`);
-				if (result === 'touch') {
-					// Tool the block: the hitter goes off the hands and out.
-					if (rules.has(hitter, 'toolTheBlock')) {
-						const tool = roll(a.team, a.hitter, 'tool');
-						const out = tool >= config.abilities.toolTheBlockOn;
-						log(`${hitter.name} goes for the hands · d6 ${tool} → ${out ? 'off the block and out' : 'stays in'}`, 'tool', {
-							die: tool,
-							out,
-							player: hitter.name,
-							team: a.team
-						});
-						if (out) return scorePoint(g, a.team, 'kill', `off ${blocker.name}'s hands`);
-					}
-					a.blockDie = die;
-					g.phase = { kind: 'touched' };
-					return;
-				}
-			}
+			// A read block is late, with less over the net.
+			if (blocking && blocks(mode === 'read' ? config.readBlockBonus : config.blockBonus, mode, intoBlock)) return;
 
-			const reach = calls.shot === 'over' ? rules.overReach(calls.stance) : rules.reach(rules.distance(defenderAt, where), defender);
-			const read = rules.isRead(calls.shot, calls.block, calls.stance);
+			const { reach, bonus, outcome } = rules.digEffect(calls, where, defender);
 			const digDie = roll(defending, 'defender', 'dig');
-			let dig = rules.digTotal(defender.defense, reach, digDie, read);
+			let dig = Math.floor(defender.defense * reach) + digDie + bonus;
 			if (mode === 'none') dig += config.noBlockDigBonus;
 			if (calls.defenceSpecial === 'dig') dig += config.specialDig;
 			const libero = rules.has(defender, 'liberoInstincts') ? config.abilities.liberoDig : 0;
 			dig += libero;
 			if (config.partnerPoolOnDig) dig += Math.floor((blocker.defense + roll(defending, 'blocker', 'pool')) / 2);
 			const up = dig >= a.incoming!;
+			const scramble = outcome === 'close';
 			log(
-				`${defender.name} digs · ${defender.defense} × ${reach} + ${digDie}${read ? ` + ${config.readBonus} read` : ''}${mode === 'none' ? ` + ${config.noBlockDigBonus} help` : ''}${calls.defenceSpecial === 'dig' ? ` + ${config.specialDig} special` : ''}${libero ? ` + ${libero} libero` : ''} = ${dig} vs ${a.incoming} → ${up ? `up, first touch ${signed(rules.firstTouch(digDie))}` : 'kill'}`,
+				`${defender.name} ${scramble ? 'scrambles' : 'digs'} · ${defender.defense} × ${reach} + ${digDie}${bonus ? ` + ${bonus} ${scramble ? 'scramble' : 'read'}` : ''}${mode === 'none' ? ` + ${config.noBlockDigBonus} help` : ''}${calls.defenceSpecial === 'dig' ? ` + ${config.specialDig} special` : ''}${libero ? ` + ${libero} libero` : ''} = ${dig} vs ${a.incoming} → ${up ? `up, first touch ${signed(rules.firstTouch(digDie))}` : 'kill'}`,
 				'dig',
 				{
 					shot: calls.shot,
-					read,
+					read: outcome === 'read',
+					...(calls.touch && { outcome }),
 					up,
 					total: dig,
 					die: digDie,

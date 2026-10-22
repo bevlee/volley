@@ -20,6 +20,8 @@
 		"sim:specials": "tsx scripts/specials.ts",
 		"sim:run": "tsx scripts/run.ts",
 		"sim:abilities": "tsx scripts/abilities.ts",
+		"sim:tempo": "tsx scripts/tempo.ts",
+		"sim:depth": "tsx scripts/depth.ts",
 		"start": "tsx server/index.ts"
 	},
 	"devDependencies": {

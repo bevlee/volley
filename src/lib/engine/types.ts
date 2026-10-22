@@ -6,8 +6,15 @@ export type Channel = 'line' | 'cross';
 /** Where a serve is aimed: straight at one of the receivers, or the seam between them. */
 export type ServeTarget = Slot | 'seam';
 export type Stance = 'deep' | 'short';
-/** How fast the set is: a fast one is hard to read but harder to aim. */
+/**
+ * How fast the set is: a fast one is hard to read but harder to aim. In advanced mode, 'fast' is a
+ * quick ball and 'high' a high ball.
+ */
 export type Tempo = 'fast' | 'high';
+/** Advanced mode: how the ball is played over. A tip drops short; a hard hit and a roll go deep. */
+export type Touch = 'hard' | 'tip' | 'roll';
+/** Advanced mode: how the defender's corner compares with the ball's. Close is one corner off: a scramble. */
+export type ReadOutcome = 'read' | 'close' | 'wrong';
 /**
  * How the blocker plays it: commit to the called channel before the hit, read the hitter and move
  * late, or stay down and help dig.
@@ -38,6 +45,8 @@ export type AbilityId =
 export interface AttackOption {
 	shot: Shot;
 	tempo?: Tempo;
+	/** Advanced mode: how it's played. `shot` is then a channel. */
+	touch?: Touch;
 }
 
 export interface Player {
@@ -67,8 +76,10 @@ export interface Calls {
 	/** The channel the blocker takes, or (reading) starts on. */
 	block: Channel;
 	stance: Stance;
-	/** Only when sets and blocks have modes (`config.blockModes`). */
+	/** When sets and blocks have modes (`config.blockModes`), or in advanced mode, where the set decides it. */
 	tempo?: Tempo;
+	/** Advanced mode (`config.advanced`): how the ball is played. `shot` is then a channel. */
+	touch?: Touch;
 	blockMode?: BlockMode;
 	/** Special charges spent on this attack, when `config.specials` is on and the side has one. */
 	special?: boolean;
