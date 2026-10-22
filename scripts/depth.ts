@@ -25,8 +25,7 @@ import type { BlockMode, Channel, Game, Phase, Stance, TeamId } from '../src/lib
  * - smart, reader: as in the lookahead, off the same tables as mixed.
  *
  * --sampled[=rollouts] also plays the lookahead's own players, whose fixed rollout seeds give each
- * call one noisy table: that's what `sim:tempo` measures, and it lands inside the sim's margins.
- * The noise makes them play more like smart, so against random they do better than balanced.
+ * call one noisy table: that's what `sim:tempo` measures.
  * --control checks the enumeration against seeded engine hits.
  *
  * A variant name can carry config changes as JSON, merged in after the variant's own:
@@ -470,7 +469,7 @@ function players(model: Model) {
 
 /**
  * How often balanced play picks each kind of call (a touch, a stance, staying down), as a share of
- * the calls where it's open, and how often it's open. An option it never picks anywhere is dead weight.
+ * the calls where it's open, and how often it's open.
  */
 function picks(model: Model, solved: Map<Call, { attack: Mix; defence: Mix }>, perCall: Float64Array) {
 	const kinds = new Map<string, { picked: number; open: number }>();

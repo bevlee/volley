@@ -241,7 +241,6 @@
 	.B .dig-label {
 		color: var(--team-b);
 	}
-	/* The pick: the shot's own colour for where (and both quick-ball buttons), outlined for how. */
 	.big button.on,
 	.where.on {
 		background: var(--actual);

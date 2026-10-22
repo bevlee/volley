@@ -22,7 +22,6 @@ export function advancedFor(team: Team): boolean {
 	return true;
 }
 
-/** Advanced mode: a great set is a quick ball, anything worse a high ball. */
 export const tempoOf = (setMod: number): Tempo => (setMod >= config.quickBallMinSet ? 'fast' : 'high');
 
 /** The tempo the set left the side attacking now, in advanced mode. */
@@ -34,7 +33,6 @@ export function tempoIn(g: Game): Tempo | undefined {
 /** The defender's options: none against a quick ball, which leaves them no time to move. */
 export const stancesIn = (g: Game): Stance[] => (tempoIn(g) === 'fast' ? [] : [...STANCES]);
 
-/** Advanced mode: the attacks off a set this good. A quick ball is hit hard; a high ball is any shot the set leaves on. */
 function advancedOptions(setMod: number): AttackOption[] {
 	const tempo = tempoOf(setMod);
 	if (tempo === 'fast') return CHANNELS.map((shot) => ({ shot, tempo, touch: 'hard' }));
@@ -214,7 +212,7 @@ export function landing(
 	return closest.length === 1 ? closest[0] : pickTie(closest);
 }
 
-/** Advanced mode: where each shot lands if it's on target. Hard and roll go deep, a tip drops short. */
+/** Advanced mode: where each shot lands if it's on target. */
 export const LANDING: Record<Channel, Record<Touch, Zone>> = {
 	line: { hard: 1, tip: 2, roll: 1 },
 	cross: { hard: 5, tip: 4, roll: 5 }
@@ -239,10 +237,8 @@ function misses(a: Zone, b: Zone): number {
 	return Number(ra !== rb) + Number(ca !== cb);
 }
 
-/** Where the called shot is aimed. */
 export const targetOf = (calls: Calls): Zone => (calls.touch ? LANDING[calls.shot as Channel][calls.touch] : TARGET[calls.shot]);
 
-/** Where the defender plays for these calls. */
 export const defenderAt = (calls: Calls): Zone =>
 	calls.touch ? CORNER[calls.block][calls.stance] : defenderZone(calls.stance, calls.block);
 
@@ -286,7 +282,6 @@ export const reach = (dist: number, digger?: Player) =>
  */
 export function digEffect(calls: Calls, ball: Zone, digger: Player): { reach: number; bonus: number; outcome: ReadOutcome } {
 	if (calls.touch) {
-		// Staying down, both defenders dig: nobody is on the ball, and nobody is far from it.
 		const outcome = calls.blockMode === 'none' ? 'close' : readOutcome(defenderAt(calls), ball);
 		return { ...config.tempoDig[outcome], outcome };
 	}

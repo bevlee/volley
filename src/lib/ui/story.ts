@@ -24,7 +24,6 @@ export const SHOT_PHRASE: Record<Shot, string> = {
 	over: 'to dig it over deep'
 };
 
-/** Advanced mode: how each touch is played over. */
 const TOUCH_VERB: Record<Touch, string> = { hard: 'hits it hard', tip: 'tips it short', roll: 'rolls it deep' };
 
 /** Advanced mode: the shot in words, e.g. "tips it short down the line"; a quick ball is a swing. */
@@ -37,7 +36,6 @@ const touchOf = (d: Data) => (d.touch ? { shot: d.shot as Channel, touch: d.touc
 /** A soft shot, in any game: a tip, or advanced mode's tip or roll. */
 const softHit = (d: Data | undefined) => d?.shot === 'tip' || d?.touch === 'tip' || d?.touch === 'roll';
 
-/** What a soft shot is called: "tip" or "roll". */
 const softWord = (d: Data) => (d.touch === 'roll' ? 'roll' : 'tip');
 
 /** One plain word per way a point ends: kill, block or error. */

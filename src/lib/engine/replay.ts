@@ -56,7 +56,7 @@ function recordedChoosers(record: GameRecord) {
 			throw new ReplayError(`call ${index + 1}: the computer's ${part} replays as ${drawn}, recorded ${recorded}`);
 		return drawn;
 	};
-	/** A part the engine asks for only in some games: missing from the record means it was never made. */
+	/** The recorded touch or block mode: a record without it is bad. */
 	const recorded = <K extends 'touch' | 'blockMode'>(part: K): NonNullable<Calls[K]> => {
 		const value = call()[part];
 		if (value === undefined) throw new ReplayError(`call ${index + 1}: no ${part} recorded`);

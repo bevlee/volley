@@ -343,7 +343,6 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			/** The block roll. True when it ends the attack: a stuff scores, and a touch is the blocking side's first contact. */
 			const blocks = (base: number, mode: BlockMode, intoBlock: boolean): boolean => {
 				const die = roll(defending, 'blocker', 'block');
-				// Wall commits harder.
 				const bonus =
 					base +
 					(mode === 'commit' && rules.has(blocker, 'wall') ? config.abilities.wallBlock : 0) +

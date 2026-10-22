@@ -661,7 +661,6 @@
 	.cover-tag.pick {
 		fill: var(--muted);
 	}
-	/* Advanced mode: the defence's own colour for what it covers, the block's for the block, red for open. */
 	.tempo-cover {
 		opacity: 0.75;
 	}

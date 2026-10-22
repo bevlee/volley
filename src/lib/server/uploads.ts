@@ -27,7 +27,6 @@ export interface Upload {
 	name: string | null;
 }
 
-/** Pages from before advanced mode send no rules: their games are normal. */
 const RULES: readonly Rules[] = ['normal', 'advanced'];
 
 const oneOf = <T extends string>(v: unknown, values: readonly T[]): v is T => values.includes(v as T);
@@ -51,6 +50,7 @@ function isCall(c: unknown): c is RecordedCall {
 /** An upload in the right shape, or why not. It still has to replay before it's saved. */
 export function parseUpload(body: unknown): Upload | string {
 	if (typeof body !== 'object' || body === null) return 'Expected a JSON object';
+	// Pages from before advanced mode send no rules: their games are normal.
 	const { seed, rules = 'normal', calls, fingerprint, playerId, team, name } = body as Record<string, unknown>;
 	if (!Number.isSafeInteger(seed) || (seed as number) < 0 || (seed as number) >= 2 ** 32) return 'Bad seed';
 	if (!oneOf(rules, RULES)) return 'Bad rules';

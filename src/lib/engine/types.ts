@@ -13,7 +13,7 @@ export type Stance = 'deep' | 'short';
  * quick ball and 'high' a high ball.
  */
 export type Tempo = 'fast' | 'high';
-/** Advanced mode: how the ball is played over. A tip drops short; a hard hit and a roll go deep. */
+/** Advanced mode: how the ball is played over. */
 export type Touch = 'hard' | 'tip' | 'roll';
 /** Advanced mode: how the defender's corner compares with the ball's. Close is one corner off: a scramble. */
 export type ReadOutcome = 'read' | 'close' | 'wrong';

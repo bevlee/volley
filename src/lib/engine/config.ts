@@ -43,25 +43,14 @@ export const config = {
 	 */
 	advanced: false,
 	quickBallMinSet: 2,
-	/**
-	 * The worst set each high-ball shot can be hit off; null means it's always on. All on: hitting
-	 * hard off a bad set is a call to get right, not one to take away (npm run sim:depth: gating hard
-	 * below −2 costs a point of balanced vs random in 100).
-	 */
+	/** The worst set each high-ball shot can be hit off; null means it's always on. All on for now. */
 	highBallMinSet: {
 		line: { hard: null, tip: null, roll: null },
 		cross: { hard: null, tip: null, roll: null }
 	} as Record<Channel, Record<Touch, number | null>>,
-	/**
-	 * The block's bonus on a quick ball down its channel, in place of `blockBonus`. A guess the other
-	 * way is already a kill, so this is what keeps a great set from scoring four times in five.
-	 */
+	/** The block's bonus on a quick ball down its channel, in place of `blockBonus`. */
 	quickBlockBonus: 8,
-	/**
-	 * Advanced mode: the dig's reach and bonus by how the defender read the shot. Reach multiplies
-	 * defense, so a generous close row (half reach) hands a strong digger most balls without the read.
-	 * A read is worth 4, a point more than in normal games, so a defence call costs more to miss.
-	 */
+	/** Advanced mode: the dig's reach (times defense) and bonus by how the defender read the shot. */
 	tempoDig: {
 		read: { reach: 1, bonus: 4 },
 		close: { reach: 0.25, bonus: 1 },
@@ -69,10 +58,7 @@ export const config = {
 	} as Record<ReadOutcome, { reach: number; bonus: number }>,
 	/**
 	 * Advanced mode: what each touch's power and aim take from the set (`set` times the set modifier,
-	 * plus `bonus`), on top of the hitter's attack and the die. A hard hit takes the set twice over, so
-	 * it's the shot off a good set and a mistake off a bad one; a roll and a tip hit the same off any
-	 * set, softer, and a roll needs a good set to aim. With every touch as strong as a hit, a ball
-	 * nobody reads is a kill whatever the touch, and no call is better than another (npm run sim:depth).
+	 * plus `bonus`), on top of the hitter's attack and the die.
 	 */
 	touchPower: {
 		hard: { set: 2, bonus: 0 },
@@ -86,9 +72,7 @@ export const config = {
 	} as Record<Touch, { set: number; bonus: number }>,
 	/**
 	 * Advanced mode: against a high ball the blocker can stay down instead of blocking: no block, and
-	 * every ball is a close read for the dig, with `noBlockDigBonus` for the help. Right against a
-	 * soft shot, wrong against a hard one. Without it, blocking cost nothing, and the defence's only
-	 * call that mattered was deep or short.
+	 * every ball is a close read for the dig, with `noBlockDigBonus` for the help.
 	 */
 	stayDown: true,
 	/** A fast set is harder to aim. */
@@ -149,7 +133,6 @@ export const config = {
 	}
 };
 
-/** The rules in play now. */
 export const rulesInPlay = (): Rules => (config.advanced ? 'advanced' : 'normal');
 
 /** Runs `play` under `rules`, then puts back the rules that were in play. */

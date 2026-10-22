@@ -195,8 +195,9 @@ type WithStore = typeof globalThis & { [KEY]?: Promise<GameStore> };
 
 /**
  * The process's store. With Postgres, the first call runs migrations and deletes games whose rules
- * have changed: any not under a `current` fingerprint (see `rulesFingerprint`). A dev or test build must not point at the production database:
- * deleting on a rules change there would wipe production's games.
+ * have changed: any not under a `current` fingerprint (see `rulesFingerprint`). A dev or test build
+ * must not point at the production database: deleting on a rules change there would wipe
+ * production's games.
  */
 export function getStore(current: readonly string[], env: Record<string, string | undefined> = process.env): Promise<GameStore> {
 	const g = globalThis as WithStore;

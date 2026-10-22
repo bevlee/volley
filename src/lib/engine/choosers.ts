@@ -38,10 +38,8 @@ export const randomChoosers: Choosers = {
 		const tempos = attackOptionsIn(game).flatMap((o) => (o.shot === shot && o.tempo ? [o.tempo] : []));
 		return pick(rng, tempos.length ? tempos : TEMPOS);
 	},
-	// Advanced mode: staying down is one of the blocker's three jobs, with blocking line and blocking cross.
 	blockMode: (game, _team, rng) =>
 		pick(rng, config.blockModes ? blockModesIn(game) : [...blocksIn(game).map(() => 'commit' as const), 'none' as const]),
-	// The touches open for the shot already called.
 	touch: (game, _team, rng) => {
 		const shot = game.attack!.calls!.shot;
 		return pick(rng, attackOptionsIn(game).flatMap((o) => (o.shot === shot && o.touch ? [o.touch] : [])));
