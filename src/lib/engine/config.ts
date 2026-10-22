@@ -60,9 +60,10 @@ export const config = {
 	/**
 	 * Advanced mode: the dig's reach and bonus by how the defender read the shot. Reach multiplies
 	 * defense, so a generous close row (half reach) hands a strong digger most balls without the read.
+	 * A read is worth 4, a point more than in normal games, so a defence call costs more to miss.
 	 */
 	tempoDig: {
-		read: { reach: 1, bonus: 3 },
+		read: { reach: 1, bonus: 4 },
 		close: { reach: 0.25, bonus: 1 },
 		wrong: { reach: 0, bonus: 0 }
 	} as Record<ReadOutcome, { reach: number; bonus: number }>,
