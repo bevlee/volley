@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { fixedChoosers } from '../engine/choosers';
+import { fixedChoosers, randomChoosers } from '../engine/choosers';
 import { config } from '../engine/config';
 import { NUMBERED } from '../engine/lineup';
 import { newGame, step } from '../engine/rally';
 import { scriptedDice } from '../engine/rng';
 import type { Calls, Game } from '../engine/types';
-import { shotLine, tempoBanner, tempoCoverage, tempoReveal } from './tempo';
+import { nextReveal, shotLine, tempoBanner, tempoCoverage, tempoReveal, type Reveal } from './tempo';
 
 const advanced = config.advanced;
 beforeEach(() => (config.advanced = true));
@@ -106,5 +106,25 @@ describe('tempoReveal', () => {
 	it('is nothing in a normal game', () => {
 		config.advanced = false;
 		expect(tempoReveal(run(4, { shot: 'cross', block: 'line', stance: 'deep' }, [4, 4, 3, 4, 4]))).toBeNull();
+	});
+});
+
+describe('nextReveal', () => {
+	it('only ever shows the attack most recently called', () => {
+		let shown = 0;
+		for (let seed = 1; seed <= 40; seed++) {
+			let g = newGame(seed);
+			let reveal: Reveal | null = null;
+			while (g.phase.kind !== 'gameOver') {
+				g = step(g, randomChoosers);
+				reveal = nextReveal(reveal, g);
+				if (!reveal) continue;
+				shown++;
+				const called = g.log.findLast((e) => e.tag === 'calls')!.data!;
+				expect(reveal.team, g.log.slice(g.logStart).map((e) => e.text).join(' / ')).toBe(called.team);
+				expect(reveal.headline.startsWith(String(called.hitter))).toBe(true);
+			}
+		}
+		expect(shown).toBeGreaterThan(1000);
 	});
 });

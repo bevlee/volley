@@ -19,7 +19,7 @@
 	import { clearsSheet, scoreSheet, type ScoreSheet } from './scores.ts';
 	import { commentary, needsDefence, needsShot, nextAction, prompt, quietLine, statusLine, stepEntries } from './story.ts';
 	import { pace, paced, PACES, reducedMotion } from './pace.svelte.ts';
-	import { tempoBanner, tempoReveal, type Reveal } from './tempo.ts';
+	import { nextReveal, tempoBanner, type Reveal } from './tempo.ts';
 
 	/**
 	 * The court and everything around it, for one game. It doesn't step the engine: whoever runs the
@@ -184,12 +184,11 @@
 		if (modes && !modes.includes(defence.blockMode)) defence.blockMode = 'commit';
 	});
 	const defending = $derived(needsDefence(view, controlled) && view === game && !locked);
-	/** Advanced mode: what the block and the dig did to the latest hit. It stays up, like the scores, until a new possession or rally starts. */
+	/** Advanced mode: what the block and the dig did to the latest hit (see nextReveal). */
 	let revealed = $state.raw<Reveal | null>(null);
 	$effect(() => {
 		if (!advanced) return;
-		const next = tempoReveal(view);
-		if (next || view.steps === 0 || clearsSheet(view)) revealed = next;
+		revealed = nextReveal(untrack(() => revealed), view);
 	});
 	/** The latest attack's numbers. They stay up after the attack, until a new possession or rally starts (see clearsSheet). */
 	let sheet = $state.raw<ScoreSheet | null>(null);

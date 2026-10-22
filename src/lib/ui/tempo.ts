@@ -3,6 +3,7 @@ import { other, partner } from '../engine/rally';
 import { CORNER, GRID, LANDING, readOutcome, tempoIn } from '../engine/rules';
 import type { BlockMode, Calls, Channel, Game, ReadOutcome, Stance, TeamId, Tempo, Touch, Zone } from '../engine/types';
 import { setGrade } from './grades';
+import { clearsSheet } from './scores';
 import { stepEntries, touchPhrase } from './story';
 
 /**
@@ -203,4 +204,11 @@ export function tempoReveal(g: Game): Reveal | null {
 
 	const headline = `${g.teams[a.team][a.hitter].name} ${touchPhrase(calls.shot as Channel, calls.touch, quick)}`;
 	return { team: a.team, defending, headline, block: blockRow, dig: digRow, tally };
+}
+
+/** The reveal to show after this step: the latest hit's, kept up until a new possession or rally starts, or the next attack is called. */
+export function nextReveal(shown: Reveal | null, g: Game): Reveal | null {
+	const next = tempoReveal(g);
+	const newCall = stepEntries(g).some((e) => e.tag === 'calls');
+	return next || g.steps === 0 || clearsSheet(g) || newCall ? next : shown;
 }
