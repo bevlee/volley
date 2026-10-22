@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { withRules } from '../engine/config';
 import { NUMBERED } from '../engine/lineup';
 import { fixedChoosers } from '../engine/choosers';
 import { newGame, step } from '../engine/rally';
@@ -216,5 +217,32 @@ describe('clearsSheet', () => {
 	it('keeps it through the set and the attack', () => {
 		expect(clearsSheet(run(2, line, [4, 4]))).toBe(false);
 		expect(clearsSheet(run(4, line, [4, 4, 2, 4, 6]))).toBe(false);
+	});
+});
+
+describe('scoreSheet in advanced mode', () => {
+	const sum = (terms: { value: string; aside?: boolean }[]) =>
+		terms.filter((t) => !t.aside).reduce((n, t) => n + Number(t.value.replace('−', '-')), 0);
+
+	it('adds up to the engine’s totals for every touch, block and dig, quick balls and stay-downs included', () => {
+		const seen = new Set<string>();
+		withRules('advanced', () => {
+			for (let seed = 1; seed <= 30; seed++) {
+				let g = newGame(seed);
+				while (g.phase.kind !== 'gameOver') {
+					g = step(g);
+					const s = scoreSheet(g);
+					const hit = g.log.slice(g.logStart).find((e) => e.tag === 'hit');
+					if (!s || !hit) continue;
+					const calls = g.attack!.calls!;
+					seen.add(`${calls.tempo} ${calls.touch} ${calls.blockMode ?? ''}`);
+					expect(sum(s.attack.terms), `seed ${seed} attack`).toBe(s.attack.total);
+					if (s.aim) expect(sum(s.aim.terms), `seed ${seed} aim`).toBe(s.aim.total);
+					if (s.block) expect(sum(s.block.terms), `seed ${seed} block`).toBe(s.block.total);
+					if (s.dig) expect(sum(s.dig.terms), `seed ${seed} dig`).toBe(s.dig.total);
+				}
+			}
+		});
+		expect([...seen]).toEqual(expect.arrayContaining(['fast hard ', 'high hard commit', 'high tip commit', 'high roll none']));
 	});
 });

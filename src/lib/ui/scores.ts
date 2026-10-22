@@ -1,7 +1,7 @@
 import { config } from '../engine/config';
 import { other, partner } from '../engine/rally';
-import { firstTouch } from '../engine/rules';
-import type { Game, RollLabel, Shot, TeamId } from '../engine/types';
+import { firstTouch, tempoIn, touchAim, touchSet } from '../engine/rules';
+import type { Game, ReadOutcome, RollLabel, Shot, TeamId, Touch } from '../engine/types';
 import { hitGrade, penalty, setGrade, touchGrade } from './grades';
 import { stepEntries } from './story';
 
@@ -51,6 +51,8 @@ export interface Score {
 
 export interface ScoreSheet {
 	shot: Shot | null;
+	/** Advanced mode: a soft shot's touch, a tip or a roll; null for anything else. */
+	softTouch: Touch | null;
 	attack: Score;
 	/** What the set adds to the hit: its score, plus the attack bonus on a hard shot. */
 	setBonus: number;
@@ -71,6 +73,8 @@ export interface ScoreSheet {
 /** A number in the breakdown: a minus sign when it's negative, otherwise just the number (0 included). */
 const num = (n: number) => (n < 0 ? `−${-n}` : `${n}`);
 const REACH_NOTE: Record<number, string> = { 0.5: 'one zone from where it landed', 0.25: 'two or more zones from where it landed' };
+/** Advanced mode: the dig's reach by how the defender read it. */
+const READ_NOTE: Record<ReadOutcome, string> = { read: 'on the corner it landed in', close: 'one corner off, a scramble', wrong: 'wrong side and wrong depth' };
 
 export function scoreSheet(g: Game): ScoreSheet | null {
 	const a = g.attack;
@@ -87,9 +91,17 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 	const hitter = team[a.hitter];
 	const setter = team[partner(a.hitter)];
 	const shot = a.calls?.shot ?? null;
+	/** Advanced mode: how it's played; before the call, the sheet shows a hard hit. */
+	const touch: Touch | undefined = a.calls?.touch ?? (tempoIn(g) ? 'hard' : undefined);
+	/** A tip, or advanced mode's tip or roll: no attack bonus from the setter, and over the block. */
+	const soft = shot === 'tip' || (touch !== undefined && touch !== 'hard');
+	const softWord = touch && touch !== 'hard' ? touch : 'tip';
+	/** What the set adds to the power and the aim: in advanced mode, each touch takes its own share of it. */
+	const setPower = touch ? touchSet(touch, a.setMod) : a.setMod;
+	const setAim = touch ? touchAim(touch, a.setMod) : a.setMod;
 
 	const share = Math.floor((setter.attack + a.setDie) / 2);
-	const setBonus = a.setMod + (shot === 'tip' ? 0 : share);
+	const setBonus = setPower + (soft ? 0 : share);
 	const grade = setGrade(a.setMod);
 	const FIRST: Record<typeof a.source, string> = { free: 'pass', dig: 'dig', touch: 'block touch' };
 	const firstWord = a.source === 'touch' ? 'Block touch' : `${touchGrade(a.firstMod)} ${FIRST[a.source]}`;
@@ -119,7 +131,8 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 				};
 	const setQuality: Term = {
 		label: 'Set score',
-		value: num(a.setMod),
+		value: num(setPower),
+		...(touch && setPower !== a.setMod && { note: touchNote(touch, a.setMod) }),
 		scaleOf: 'Set roll',
 		scale: setTable(a.firstMod, a.setDie)
 	};
@@ -129,8 +142,8 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 		{ label: `${hitter.name}'s Atk`, value: `${hitter.attack}` },
 		{ label: 'Power roll', value: `${die('power') ?? '?'}` },
 		firstTerm,
-		shot === 'tip' ? { ...setQuality, note: 'Tips don’t get the attack bonus.' } : setQuality,
-		...(shot === 'tip'
+		soft ? { ...setQuality, note: [setQuality.note, `${cap(softWord)}s don’t get the attack bonus.`].filter(Boolean).join(' ') } : setQuality,
+		...(soft
 			? []
 			: [
 					{
@@ -158,7 +171,7 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 					terms: [
 						{ label: 'Aim roll', value: `${die('aim') ?? '?'}` },
 						{ label: FIRST_SCORE[a.source], value: num(a.firstMod) },
-						{ label: 'Set score', value: num(a.setMod) },
+						{ label: 'Set score', value: num(setAim), ...(touch && setAim !== a.setMod && { note: `Set ${num(a.setMod)} × ${config.touchAim[touch].set}: a roll needs a good set to aim.` }) },
 						{ label: `${setter.name}'s Atk (setter)`, value: `${setter.attack}` },
 						...(a.calls?.special ? [{ label: `★ ${hitter.name}'s special`, value: `${config.specialHitAccuracy}` }] : [])
 					],
@@ -175,7 +188,7 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 	const defending = g.teams[other(a.team)];
 	if (attack.total !== null && shot) {
 		const t = attack.total;
-		const blockable = shot !== 'tip' && (shot === a.calls!.block || aim?.result === 'block');
+		const blockable = !soft && a.calls!.blockMode !== 'none' && (shot === a.calls!.block || aim?.result === 'block');
 		if (aim?.result === 'easy') attack.totalNote = 'Mis-hit: an easy ball over';
 		else {
 			attack.totalOf = 'To stop it';
@@ -197,9 +210,9 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 			? `Automatic kill: set roll 6 and power roll 6.`
 			: `Hitting error: set roll 1 and power roll 1.`;
 	}
-	else if (killed) attack.verdict = shot === 'tip' ? 'Tip kill' : 'Kill';
+	else if (killed) attack.verdict = soft ? `${cap(softWord)} kill` : 'Kill';
 	else if (hit && attack.total !== null && shot) {
-		attack.verdict = `${hitGrade(attack.total, shot, aim?.result === 'easy')} ${shot === 'tip' ? 'tip' : 'hit'}`;
+		attack.verdict = `${hitGrade(attack.total, soft ? 'tip' : shot, aim?.result === 'easy')} ${soft ? softWord : 'hit'}`;
 	}
 	// Only penalties get a number here; the breakdown has them all.
 	const paren = (mod: number) => (mod < 0 ? ` (${penalty(mod).trim()})` : '');
@@ -217,9 +230,11 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 			terms: [
 				{ label: `${b.name}'s Def`, value: `${b.defense}` },
 				{ label: 'Block roll', value: `${die('block') ?? '?'}` },
-				shot === a.calls?.block
-					? { label: `Blocked the ${shot}`, value: `${config.blockBonus}`, tip: 'For reading the attack.' }
-					: { label: 'Hit into the block', value: `${config.blockBonus}`, tip: 'The aim was so far off the shot went straight into the blocker.' },
+				a.calls?.tempo === 'fast' && touch
+					? { label: `Blocked the quick ${shot}`, value: `${config.quickBlockBonus}`, tip: 'A quick ball is stopped by the block or it’s down.' }
+					: shot === a.calls?.block
+						? { label: `Blocked the ${shot}`, value: `${config.blockBonus}`, tip: 'For reading the attack.' }
+						: { label: 'Hit into the block', value: `${config.blockBonus}`, tip: 'The aim was so far off the shot went straight into the blocker.' },
 				...(a.calls?.defenceSpecial === 'block' ? [{ label: `★ ${b.name}'s special`, value: `${config.specialBlock}`, tip: 'A charge spent on the block.' }] : [])
 			],
 			total: Number(blocked.total),
@@ -230,7 +245,8 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 		};
 	} else if (hit && a.calls) {
 		if (accuracy?.result === 'easy') blockNote = 'Mis-hit: an easy ball over, so no block';
-		else if (shot === 'tip') blockNote = 'A tip goes over the block';
+		else if (touch && a.calls.blockMode === 'none') blockNote = `${defending.blocker.name} stayed down: no block`;
+		else if (soft) blockNote = `A ${softWord} goes over the block`;
 		else if (shot !== a.calls.block) blockNote = `Blocking ${a.calls.block}, so the ${shot} goes around`;
 	}
 
@@ -239,23 +255,47 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 	if (dug) {
 		const reach = Number(dug.reach);
 		const d = defending.defender;
+		const outcome = dug.outcome as ReadOutcome | undefined;
 		const digTerms: Term[] = [
-			{
-				label: `${d.name}'s Def`,
-				value: `${Math.floor(d.defense * reach)}`,
-				note: REACH_NOTE[reach] && `Def ${d.defense} × ${reach}: ${REACH_NOTE[reach]}`,
-				tip: reach < 1 ? 'Rounded down.' : undefined,
-				scale: [
-					{ label: 'Standing where it lands', value: 'Def × 1', reach: 1 },
-					{ label: 'One zone away', value: 'Def × 0.5', reach: 0.5 },
-					{ label: 'Two or more zones away', value: 'Def × 0.25', reach: 0.25 }
-				].map(({ reach: r, ...row }) => ({ ...row, on: r === reach }))
-			},
+			outcome
+				? {
+						label: `${d.name}'s Def`,
+						value: `${Math.floor(d.defense * reach)}`,
+						note: reach < 1 ? `Def ${d.defense} × ${reach}: ${READ_NOTE[outcome]}` : undefined,
+						tip: reach < 1 ? 'Rounded down.' : undefined,
+						scale: (['read', 'close', 'wrong'] as const).map((o) => ({
+							label: cap(READ_NOTE[o]),
+							value: `Def × ${config.tempoDig[o].reach}`,
+							on: o === outcome
+						}))
+					}
+				: {
+						label: `${d.name}'s Def`,
+						value: `${Math.floor(d.defense * reach)}`,
+						note: REACH_NOTE[reach] && `Def ${d.defense} × ${reach}: ${REACH_NOTE[reach]}`,
+						tip: reach < 1 ? 'Rounded down.' : undefined,
+						scale: [
+							{ label: 'Standing where it lands', value: 'Def × 1', reach: 1 },
+							{ label: 'One zone away', value: 'Def × 0.5', reach: 0.5 },
+							{ label: 'Two or more zones away', value: 'Def × 0.25', reach: 0.25 }
+						].map(({ reach: r, ...row }) => ({ ...row, on: r === reach }))
+					},
 			{ label: 'Dig roll', value: `${die('dig') ?? '?'}` }
 		];
+		if (outcome && config.tempoDig[outcome].bonus) {
+			const scramble = outcome === 'close';
+			digTerms.push({
+				label: scramble ? 'Scramble' : 'Read the attack',
+				value: `${config.tempoDig[outcome].bonus}`,
+				note: scramble ? `${d.name} was one corner off.` : `${d.name} was on the corner it landed in.`
+			});
+		}
+		if (outcome && a.calls?.blockMode === 'none') {
+			digTerms.push({ label: `${defending.blocker.name} stayed down`, value: `${config.noBlockDigBonus}`, note: 'Help on the dig, with no block.' });
+		}
 		// A defender who read the call is standing on its target, and a drift comes to them, so they
 		// always dig with full Def as well.
-		if (dug.read && shot) {
+		if (!outcome && dug.read && shot) {
 			digTerms.push({ label: 'Read the attack', value: `${config.readBonus}`, note: `${d.name} was covering the ${shot} that was called.` });
 		}
 		if (a.calls?.defenceSpecial === 'dig') {
@@ -278,8 +318,18 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 
 	const note = a.source === 'touch' ? `Off a block touch there’s no pass, so the set and the aim take ${num(config.touchFirstMod)}` : null;
 
-	const attackBonus = shot === 'tip' ? 0 : share;
-	return { shot, attack, setBonus, attackBonus, setup, aim, block, blockNote, note, dig };
+	const attackBonus = soft ? 0 : share;
+	const softTouch = touch && touch !== 'hard' ? touch : null;
+	return { shot, softTouch, attack, setBonus, attackBonus, setup, aim, block, blockNote, note, dig };
+}
+
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+
+/** Advanced mode: what a touch takes from the set, for the note under the set score. */
+function touchNote(touch: Touch, setMod: number): string {
+	const { set, bonus } = config.touchPower[touch];
+	if (set === 0) return `A ${touch} doesn’t take power from the set: a flat ${num(bonus)}.`;
+	return `Set ${num(setMod)} × ${set}${bonus ? ` ${bonus < 0 ? '−' : '+'} ${Math.abs(bonus)}` : ''}: ${touch === 'hard' ? 'a hard hit takes the set twice over' : `the ${touch}'s share`}.`;
 }
 
 /** What a block total does against the attack: stuff it, touch it, or let it through the block. */
@@ -343,6 +393,7 @@ const AIM: Record<string, string> = {
 export function setLine(s: ScoreSheet): string {
 	if (s.aim) return `Aim ${s.aim.total} · ${AIM[s.aim.result]}`;
 	const set = num(s.setBonus - s.attackBonus);
-	if (s.shot === 'tip') return `Set score ${set} on the tip (no attack bonus on a tip)`;
+	const soft = s.softTouch ?? (s.shot === 'tip' ? 'tip' : null);
+	if (soft) return `Set score ${set} on the ${soft} (no attack bonus on a ${soft})`;
 	return `Set score ${set} + attack bonus ${num(s.attackBonus)}${s.shot ? '' : ' on a hard hit'}`;
 }
