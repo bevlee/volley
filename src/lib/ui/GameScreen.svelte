@@ -3,7 +3,7 @@
 	import { config } from '#lib/engine/config.ts';
 	import { other } from '#lib/engine/rally.ts';
 	import { attackOptionsIn, blockModesFor, SHOTS } from '#lib/engine/rules.ts';
-	import type { AttackOption, BlockMode, Channel, DefenceSpecial, Game, Shot, Stance, TeamId, Tempo } from '#lib/engine/types.ts';
+	import type { AttackOption, BlockMode, Channel, DefenceSpecial, Game, Shot, Stance, TeamId, Tempo, Touch } from '#lib/engine/types.ts';
 	import BuildUp from './BuildUp.svelte';
 	import Controls from './Controls.svelte';
 	import Court from './Court.svelte';
@@ -73,8 +73,11 @@
 		overDisabled?: boolean;
 		/** Space or the step button when there's no call to make: serve, play on, next rally. */
 		onadvance: () => void;
-		/** `tempo` when set tempos are in play; `special` when the hitter spends a charge (the ?specials prototype). */
-		onshot: (shot: Shot, extra?: { tempo?: Tempo; special?: boolean }) => void;
+		/**
+		 * `tempo` when set tempos are in play; `touch` in advanced mode; `special` when the hitter spends
+		 * a charge (the ?specials prototype).
+		 */
+		onshot: (shot: Shot, extra?: { tempo?: Tempo; touch?: Touch; special?: boolean }) => void;
 		/** `blockMode` when block modes are in play; `spend` when the blocker or digger spends a charge (the ?specials prototype). */
 		ondefence: (defence: { block: Channel; stance: Stance; blockMode?: BlockMode; spend?: DefenceSpecial }) => void;
 		/** The game-over button. */
