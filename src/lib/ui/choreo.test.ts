@@ -38,7 +38,7 @@ function scripted(calls: Calls, dice: number[], steps: number) {
 const tagged = (g: Game, tag: string) => stepEntries(g).find((e) => e.tag === tag)?.data;
 const end = (l: { at: number; ms: number }) => l.at + l.ms;
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
-const held = (p: Point) => ({ x: p.x + 34, y: p.y - 20 });
+const held = (p: Point) => ({ x: p.x + (p.y > 280 ? -34 : 34), y: p.y - 20 });
 
 describe('every step of a game', () => {
 	const games = [1, 2, 3, 4, 5, 6, 7, 8].flatMap((seed) => stepsOf(seed));

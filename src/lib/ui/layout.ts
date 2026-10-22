@@ -267,9 +267,13 @@ export function ballVia(g: Game, pos: Positions, bottom: TeamId = 'A'): Point | 
 	return null;
 }
 
-/** A held ball sits at the top corner of the holder's chip. */
+/**
+ * A held ball sits at the top corner of the holder's chip, on the side they hit from: attacks come
+ * from the hitter's left, which is the screen's left for the bottom team and its right for the top.
+ */
 const HELD = { x: 34, y: -20 };
-const held = (p: Point): Point => ({ x: p.x + HELD.x, y: p.y + HELD.y });
+const heldX = (p: Point) => p.x + (p.y > VIEW.netY ? -HELD.x : HELD.x);
+const held = (p: Point): Point => ({ x: heldX(p), y: p.y + HELD.y });
 
 /**
  * Where the ball is drawn when play stops on `g`: held by whoever has it, landed in a zone (on the
@@ -282,7 +286,7 @@ export function ballRest(g: Game, pos: Positions, bottom: TeamId = 'A'): Point {
 	const a = g.attack;
 	if (how === 'dropped' && a) {
 		const setter = zoneCenter(a.team, pos[a.team][partner(a.hitter)], bottom);
-		return { x: setter.x + HELD.x, y: setter.y + 26 };
+		return { x: heldX(setter), y: setter.y + 26 };
 	}
 	if (a?.calls && a.landing && g.phase.kind !== 'touched') {
 		const zone = zoneCenter(other(a.team), a.landing, bottom);

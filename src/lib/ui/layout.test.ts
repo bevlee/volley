@@ -7,7 +7,7 @@ import type { Game } from '../engine/types';
 import { scriptedDice } from '../engine/rng';
 
 /** A held ball is drawn at the top corner of the holder's chip. */
-const held = (p: { x: number; y: number }) => ({ x: p.x + 34, y: p.y - 20 });
+const held = (p: { x: number; y: number }) => ({ x: p.x + (p.y > 280 ? -34 : 34), y: p.y - 20 });
 import { arcPath, arcPoint, ballAt, ballRest, ballVia, blockBar, calloutTop, coverage, flightKind, halfBox, shotPoint, previewDefence, placeDice, positions, rollBall, rollPositions, roleOf, zoneBox, zoneCenter } from './layout';
 
 describe('placeDice', () => {
@@ -241,6 +241,17 @@ describe('calloutTop', () => {
 });
 
 describe('rollBall', () => {
+	it("holds the ball on the side each team hits from: the bottom team's left, the top team's right", () => {
+		for (const [team, side] of [['A', -1], ['B', 1]] as const) {
+			const before = newGame(1, NUMBERED);
+			before.phase = { kind: 'set' };
+			before.attack = { team, hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0 };
+			const rolls = [{ team, slot: 'defender' as const, die: 5, label: 'set' as const }];
+			const ball = rollBall(before, rolls, rollPositions(before, rolls));
+			expect(Math.sign(ball.x - zoneCenter(team, 3).x), team).toBe(side);
+		}
+	});
+
 	it('sends the ball straight to the setting spot as the setter gets there', () => {
 		const before = newGame(1, NUMBERED);
 		before.phase = { kind: 'set' };
