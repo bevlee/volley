@@ -14,6 +14,7 @@ beforeEach(() => {
 		cross: { hard: -1, tip: null, roll: null }
 	};
 	config.quickBlockBonus = 3;
+	config.tempoDig = { read: { reach: 1, bonus: 3 }, close: { reach: 0.5, bonus: 1 }, wrong: { reach: 0.25, bonus: 0 } };
 });
 afterEach(() => Object.assign(config, structuredClone(saved)));
 
@@ -83,7 +84,7 @@ describe('advanced mode rallies', () => {
 		// Pass 4 (±0), set 4 (±0), power 3, aim 4: 4 + 0 + 0 + 4 = 8, on target.
 		const high = [4, 4, 3, 4];
 
-		it('a close read is a scramble at half reach and a smaller bonus', () => {
+		it("a close read is a scramble, at the close row's reach and bonus", () => {
 			// Line tip (4 + 3 = 7, no setter share) lands in 2; the defender plays 1. Dig 4 × 0.5 + 5 + 1 = 8: up.
 			const g = run(4, { shot: 'line', touch: 'tip', block: 'cross', stance: 'deep' }, [...high, 5]);
 			const dig = entries(g, 'dig')[0];

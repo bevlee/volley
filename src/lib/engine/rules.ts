@@ -5,8 +5,8 @@ export const ZONES: readonly Zone[] = [1, 2, 3, 4, 5, 6];
 /** The shots of a normal game. A dig over (`over`) is run mode only. */
 export const SHOTS: readonly Shot[] = ['line', 'cross', 'tip'];
 const CHANNELS: readonly Channel[] = ['line', 'cross'];
-export const TOUCHES: readonly Touch[] = ['hard', 'tip', 'roll'];
-export const STANCES: readonly Stance[] = ['deep', 'short'];
+const TOUCHES: readonly Touch[] = ['hard', 'tip', 'roll'];
+const STANCES: readonly Stance[] = ['deep', 'short'];
 const TEMPOS: readonly Tempo[] = ['fast', 'high'];
 const BLOCK_MODES: readonly BlockMode[] = ['commit', 'read', 'none'];
 
@@ -211,6 +211,7 @@ export const CORNER: Record<Channel, Record<Stance, Zone>> = {
 };
 
 const READ_OUTCOMES: readonly ReadOutcome[] = ['read', 'close', 'wrong'];
+const CORNERS: readonly Zone[] = [1, 2, 4, 5];
 
 /** Advanced mode: the defender's corner against the ball's. Off in depth or in side is close; off in both is wrong. */
 export const readOutcome = (defender: Zone, ball: Zone): ReadOutcome => READ_OUTCOMES[misses(defender, ball)];
@@ -221,8 +222,6 @@ function misses(a: Zone, b: Zone): number {
 	const [rb, cb] = GRID[b];
 	return Number(ra !== rb) + Number(ca !== cb);
 }
-
-const CORNERS: readonly Zone[] = [1, 2, 4, 5];
 
 /** Where the called shot is aimed. */
 export const targetOf = (calls: Calls): Zone => (calls.touch ? LANDING[calls.shot as Channel][calls.touch] : TARGET[calls.shot]);

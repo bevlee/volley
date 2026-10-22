@@ -45,19 +45,26 @@ export const config = {
 	quickBallMinSet: 2,
 	/**
 	 * The worst set each high-ball shot can be hit off; null means it's always on. Tips stay on and
-	 * the worst set leaves at least three shots (rules.test checks both).
+	 * the worst set leaves at least three shots (rules.advanced.test checks both). Every cut-off the
+	 * sim tried took away more depth than it added; this, the mildest, costs least.
 	 */
 	highBallMinSet: {
-		line: { hard: null, tip: null, roll: null },
-		cross: { hard: null, tip: null, roll: null }
+		line: { hard: -2, tip: null, roll: null },
+		cross: { hard: -2, tip: null, roll: null }
 	} as Record<Channel, Record<Touch, number | null>>,
-	/** The block's bonus on a quick ball down its channel, in place of `blockBonus`. */
-	quickBlockBonus: 3,
-	/** Advanced mode: the dig's reach and bonus by how the defender read the shot (a close read is `readBonus` − 2). */
+	/**
+	 * The block's bonus on a quick ball down its channel, in place of `blockBonus`. A guess the other
+	 * way is already a kill, so this is what keeps a great set from scoring four times in five.
+	 */
+	quickBlockBonus: 8,
+	/**
+	 * Advanced mode: the dig's reach and bonus by how the defender read the shot. Reach multiplies
+	 * defense, so a generous close row (half reach) hands a strong digger most balls without the read.
+	 */
 	tempoDig: {
 		read: { reach: 1, bonus: 3 },
-		close: { reach: 0.5, bonus: 1 },
-		wrong: { reach: 0.25, bonus: 0 }
+		close: { reach: 0.25, bonus: 1 },
+		wrong: { reach: 0, bonus: 0 }
 	} as Record<ReadOutcome, { reach: number; bonus: number }>,
 	/** A fast set is harder to aim. */
 	fastAccuracyMod: -2,
