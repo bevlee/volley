@@ -40,17 +40,21 @@
 		saved = null;
 		failed = null;
 		auto = false;
+		// Leaving before the game loads mustn't switch the next page's rules.
+		let left = false;
 		fetch(`/api/games/${encodeURIComponent(id ?? '')}?player=${encodeURIComponent(playerId())}`)
 			.then(async (res) => {
 				if (res.status === 404) throw new Error('This game isn’t saved any more. Games are cleared when the rules change.');
 				if (!res.ok) throw new Error(`Couldn’t load the game (${res.status}).`);
 				const game: Saved = await res.json();
+				if (left) return;
 				// The court and controls read the rules too, not just the replay (the layout puts them back on the way out).
 				config.advanced = game.record.rules === 'advanced';
 				playback = replayer(game.record);
 				saved = game;
 			})
 			.catch((e: Error) => (failed = e.message));
+		return () => (left = true);
 	});
 
 	const names = $derived(
