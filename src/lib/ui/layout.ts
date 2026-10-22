@@ -312,7 +312,8 @@ export function flightKind(g: Game): FlightKind {
 	const hit = entries.find((e) => e.tag === 'hit' || e.tag === 'swing');
 	if (hit) {
 		if (entries.some((e) => e.tag === 'accuracy' && e.data?.result === 'easy')) return 'lob';
-		return hit.data?.shot === 'tip' ? 'tip' : 'spike';
+		const soft = hit.data?.shot === 'tip' || hit.data?.touch === 'tip' || hit.data?.touch === 'roll';
+		return soft ? 'tip' : 'spike';
 	}
 	return entries.some((e) => e.tag === 'serve') ? 'serve' : 'lob';
 }
