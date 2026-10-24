@@ -31,7 +31,7 @@ describe('lookahead in advanced mode', () => {
 		]);
 	});
 
-	it('weighs every high-ball shot against every block and stance, blocking or staying down', () => {
+	it('weighs every high-ball shot against every block and stance, blocking or pulling off', () => {
 		// Pass 4 (±0), set 4: a ±0 set.
 		const t = table(atCalls(4, 4));
 		expect(t.attacks).toHaveLength(6);

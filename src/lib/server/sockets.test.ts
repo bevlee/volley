@@ -190,7 +190,7 @@ describe('sockets', () => {
 			await next;
 		}
 		const [{ id }] = await Promise.all([saveA, saveB]);
-		const saved = (await store.get(id, (await import('./build')).FINGERPRINT))!;
+		const saved = (await store.get(id, (await import('./build')).CURRENT))!;
 		expect(saved.mode).toBe('online');
 		expect(saved.players).toEqual({ A: a.id, B: b.id });
 		expect(saved.names).toEqual({ A: 'Ann', B: 'Bo' });

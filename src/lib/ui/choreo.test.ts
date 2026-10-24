@@ -38,7 +38,7 @@ function scripted(calls: Calls, dice: number[], steps: number) {
 const tagged = (g: Game, tag: string) => stepEntries(g).find((e) => e.tag === tag)?.data;
 const end = (l: { at: number; ms: number }) => l.at + l.ms;
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
-const held = (p: Point) => ({ x: p.x + 34, y: p.y - 20 });
+const held = (p: Point) => ({ x: p.x + (p.y > 280 ? -34 : 34), y: p.y - 20 });
 
 describe('every step of a game', () => {
 	const games = [1, 2, 3, 4, 5, 6, 7, 8].flatMap((seed) => stepsOf(seed));
@@ -197,7 +197,7 @@ describe('the defence being set up', () => {
 	it('starts the reveal from the spots the player chose, not from the ready position', () => {
 		const rally = scripted({ shot: 'line', block: 'cross', stance: 'deep' }, [4, 4], 4);
 		const calls = rally.find((s) => s.next.phase.kind === 'hit')!;
-		const chosen = previewDefence(calls.prev, 'cross', 'deep');
+		const chosen = previewDefence(calls.prev, { block: 'cross', stance: 'deep' });
 		const tl = choreograph(calls.prev, calls.next, { start: chosen });
 		expect(sample(tl, 0).spots).toEqual(spotsOf(chosen));
 		// the call was what they were showing, so nobody moves

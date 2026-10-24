@@ -42,36 +42,32 @@ export function setPace(next: Pace) {
 
 const MOTION_KEY = 'volley:motion';
 
-/** Whether the game animates: as the device asks (its reduce-motion setting), always, or reduced. */
-export type Motion = 'device' | 'on' | 'reduced';
-
 /**
- * The viewer's animation setting, remembered in this browser. It lets someone keep reduce-motion on
- * for their phone but still see the court play out here, or reduce motion in the game only.
+ * Whether the game animates. On by default, whatever the device's reduce-motion setting: without
+ * the ball's flights and the players' runs the court doesn't read as volleyball.
  */
+export type Motion = 'on' | 'reduced';
+
+/** The viewer's animation setting, remembered in this browser. */
 export const motion = $state({ value: loadMotion() });
 
 function loadMotion(): Motion {
 	try {
 		const saved = localStorage.getItem(MOTION_KEY);
-		if (saved === 'device' || saved === 'on' || saved === 'reduced') return saved;
+		if (saved === 'reduced') return saved;
 	} catch {
-		// Storage can be blocked; follow the device.
+		// Storage can be blocked; keep the default.
 	}
-	return 'device';
+	return 'on';
 }
 
-const deviceReduces = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-/** The game plays with reduced motion: chosen here, or asked for by the device while following it. */
-export const reducedMotion = () => motion.value === 'reduced' || (motion.value === 'device' && deviceReduces());
+export const reducedMotion = () => motion.value === 'reduced';
 
 /** CSS animations check `[data-motion='reduced']` on the page instead of the device's media query. */
 function applyMotion() {
 	if (typeof document !== 'undefined') document.documentElement.dataset.motion = reducedMotion() ? 'reduced' : 'full';
 }
 applyMotion();
-if (typeof matchMedia !== 'undefined') matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', applyMotion);
 
 export function setMotion(next: Motion) {
 	motion.value = next;

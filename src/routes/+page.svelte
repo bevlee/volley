@@ -11,6 +11,7 @@
 <Menu title="Volley" subtitle="2v2 beach volleyball with dice. First to {config.targetScore}, win by {config.winBy}.">
 	{#snippet art()}<CourtLoop />{/snippet}
 	<a class="choice" href="/computer"><b>Play vs computer</b></a>
+	<a class="choice" href="/advanced"><b>Advanced</b><span>Quick balls and high balls: the set decides, you place it.</span></a>
 	<a class="choice" href="/run"><b>Run</b><span>Five matches, one team that grows. Lose and start again.</span></a>
 	<a class="choice" href="/online"><b>Play vs opponent</b></a>
 	<a class="choice" href="/history"><b>Your games</b><span>Watch your finished games again.</span></a>

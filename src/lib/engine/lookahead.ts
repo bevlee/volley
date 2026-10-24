@@ -64,8 +64,8 @@ export function equilibrium(m: Payoffs, rounds = 2000): { attack: number[]; defe
 
 /**
  * Every attack and defence call open at this set: the shots and blocks it leaves on, tempos and
- * block modes when they're in play, stances unless it's a quick ball, and spending a special charge when the hitter, blocker or
- * digger has one.
+ * block modes when they're in play, stances unless it's a quick ball, and spending a special charge
+ * when the hitter, blocker or digger has one.
  */
 function options(game: Game): { attacks: AttackCall[]; defences: DefenceCall[] } {
 	const { team, hitter } = game.attack!;

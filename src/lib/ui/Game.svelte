@@ -10,7 +10,7 @@
 	import SavedLine from './SavedLine.svelte';
 	import { needsDefence, needsShot, playsItself } from './story.ts';
 
-	/** A game against the computer: the engine runs here, in the browser. */
+	/** A game against the computer: the engine runs here, in the browser, under the page's rules (see pageRules.ts). */
 
 	/** On /admin: the debug panel (D) for the seed, who you control, and playing ahead. */
 	let { admin = false }: { admin?: boolean } = $props();
@@ -110,7 +110,7 @@
 </script>
 
 <svelte:head>
-	<title>{admin ? 'Volley admin' : 'Volley · vs computer'}</title>
+	<title>{admin ? 'Volley admin' : config.advanced ? 'Volley · advanced' : 'Volley · vs computer'}</title>
 </svelte:head>
 
 <!-- Space at the call when watching (no team controlled) reveals both computer calls and rolls the attack. -->
@@ -120,8 +120,14 @@
 	{initial}
 	{controlled}
 	onadvance={() => play()}
-	onshot={(shot, extra) => playerCall('shot', { ...withShot(shot), special: () => extra?.special ?? false })}
-	ondefence={(d) => playerCall('defence', { ...withDefence(d.block, d.stance), defenceSpecial: () => d.spend ?? 'none' })}
+	onshot={(shot, extra) =>
+		playerCall('shot', { ...withShot(shot), special: () => extra?.special ?? false, ...(extra?.touch && { touch: () => extra.touch! }) })}
+	ondefence={(d) =>
+		playerCall('defence', {
+			...withDefence(d.block, d.stance),
+			defenceSpecial: () => d.spend ?? 'none',
+			...(d.blockMode && { blockMode: () => d.blockMode! })
+		})}
 	onover={newSeed}
 	{debugOpen}
 	ondebug={admin ? () => (debugOpen = !debugOpen) : null}

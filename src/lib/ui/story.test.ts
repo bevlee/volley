@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { config } from '../engine/config';
 import { NUMBERED } from '../engine/lineup';
 import { fixedChoosers } from '../engine/choosers';
 import { newGame, step } from '../engine/rally';
 import { scriptedDice } from '../engine/rng';
 import type { Calls, Game } from '../engine/types';
-import { callout, commentary, duels, narrate, quietLine, needsDefence, needsShot, nextAction, playerActions, playsItself, playSummary, statusLine, stepEntries } from './story';
+import { callout, commentary, duels, narrate, prompt, quietLine, needsDefence, needsShot, nextAction, playerActions, playsItself, playSummary, statusLine, stepEntries } from './story';
 
 function evenGame(): Game {
 	const g = newGame(1, NUMBERED);
@@ -343,5 +343,65 @@ describe('statusLine', () => {
 	it('otherwise says what just happened', () => {
 		const g = run(1, line, [4]);
 		expect(statusLine(g, null)).toBe(narrate(g.log[g.log.length - 1]));
+	});
+});
+
+describe('advanced mode', () => {
+	const advanced = config.advanced;
+	beforeEach(() => (config.advanced = true));
+	afterEach(() => (config.advanced = advanced));
+
+	/** All-4 players after B's serve. Pass 4 and set 4 make a 0 set, a high ball; pass 6 and set 4 a +2 set, a quick ball. */
+	const high = (calls: Calls, dice: number[]) => run(4, { blockMode: 'commit', ...calls }, [4, 4, ...dice], step(newGame(1, NUMBERED)));
+	const quick = (calls: Calls, dice: number[]) => run(4, { blockMode: 'commit', ...calls }, [6, 4, ...dice], step(newGame(1, NUMBERED)));
+	const tipLine: Calls = { shot: 'line', touch: 'tip', block: 'cross', stance: 'deep' };
+
+	it('says the set made a quick or a high ball, and how the player swings', () => {
+		const set = run(2, line, [6, 4], step(newGame(1, NUMBERED)));
+		expect(narrate(set.log.at(-1)!)).toBe('Quick ball off a Perfect set · swing now');
+		expect(prompt(set, 'A')).toBe('Your attack · A1 swings hard');
+		const placed = run(2, line, [4, 4], step(newGame(1, NUMBERED)));
+		expect(narrate(placed.log.at(-1)!)).toBe('High ball · time to place it');
+		expect(prompt(placed, 'A')).toBe('Your attack · A1 places it');
+	});
+
+	it('names the touch and where it goes, on the call and on the hit', () => {
+		// tip 3 off a 0 set lands on target in zone 2; B2 deep in zone 1 is a corner off and scrambles it up
+		const g = high(tipLine, [3, 4, 2]);
+		expect(narrate(g.log.find((e) => e.tag === 'calls')!)).toBe('A1 tips it short down the line · B1 takes away the cross · B2 plays deep');
+		expect(narrate(stepEntries(g).find((e) => e.tag === 'hit')!)).toBe('A1 tips it short down the line');
+		expect(playSummary(g)).toBe('A1 tips it short down the line, over the block · B1 blocks cross · B2 deep');
+		expect(duels(g)[0]).toMatchObject({ attacker: 'A1 tip', defender: 'B2 dig' });
+		expect(playerActions(g)['A-blocker']).toEqual({ move: 'tip', label: 'tip!' });
+	});
+
+	it('calls a close read that comes up a scramble, and one that doesn’t a kill', () => {
+		const up = high(tipLine, [3, 4, 2]);
+		expect(callout(up)).toMatchObject({ text: 'Scramble!', sub: "B2 dives. The ball's up.", team: 'B' });
+		expect(narrate(stepEntries(up).find((e) => e.tag === 'dig')!)).toBe('B2 scrambles it up · Shaky dig from B2');
+		// tip 6 vs a scramble of 1 + 3 + 1
+		const down = high(tipLine, [6, 4, 3]);
+		expect(callout(down)).toMatchObject({ text: 'Kill!', sub: "B2 dives but can't get it up", impact: 'tip' });
+	});
+
+	it('says a defender who read it wrong went the wrong way', () => {
+		// a cross tip lands in zone 4; deep behind a cross block, B2 is in zone 1, both ways off
+		const g = high({ shot: 'cross', touch: 'tip', block: 'cross', stance: 'deep' }, [5, 4, 2]);
+		expect(callout(g)).toMatchObject({ text: 'Kill!', sub: 'B2 went the wrong way' });
+		expect(narrate(stepEntries(g).find((e) => e.tag === 'dig')!)).toBe('B2 went the wrong way');
+	});
+
+	it('says when the blocker pulls off, and that both dig', () => {
+		const g = high({ shot: 'cross', touch: 'roll', block: 'line', stance: 'deep', blockMode: 'none' }, [3, 4, 4]);
+		expect(narrate(g.log.find((e) => e.tag === 'calls')!)).toBe('A1 rolls it deep cross-court · B1 pulls off the net · B2 and B1 both dig');
+		expect(playSummary(g)).toBe('A1 rolls it deep cross-court, over the block · B1 pulls off · B2 deep');
+		expect(playerActions(g)['A-blocker']).toEqual({ move: 'tip', label: 'roll!' });
+	});
+
+	it('calls a quick ball past a block that went the other way a kill, with no time for the defender', () => {
+		const g = quick({ shot: 'cross', touch: 'hard', block: 'line', stance: 'deep' }, [4]);
+		expect(narrate(g.log.find((e) => e.tag === 'calls')!)).toBe('A1 swings quick cross-court · B1 takes away the line · B2 has no time to move');
+		expect(narrate(stepEntries(g).find((e) => e.tag === 'hit')!)).toBe('A1 swings quick cross-court');
+		expect(callout(g)).toMatchObject({ text: 'Kill!', sub: 'Quick ball · the block went line', team: 'A', impact: 'smash' });
 	});
 });

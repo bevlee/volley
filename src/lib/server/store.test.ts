@@ -6,7 +6,7 @@ const game = (over: Partial<NewGame> = {}): NewGame => ({
 	mode: 'online',
 	version: '1.0.0',
 	fingerprint: 'fp1',
-	record: { seed: 123456789, calls: [{ shot: 'line', block: 'cross', stance: 'deep', byComputer: { shot: false, defence: true } }] },
+	record: { seed: 123456789, rules: 'normal', calls: [{ shot: 'line', block: 'cross', stance: 'deep', byComputer: { shot: false, defence: true } }] },
 	players: { A: 'p1', B: 'p2' },
 	names: { A: 'Bev', B: 'Sam' },
 	score: { A: 21, B: 17 },
@@ -27,13 +27,13 @@ function storeContract(name: string, open: () => Promise<GameStore>) {
 			const g = game();
 			const id = await store.save(g);
 			expect(id).toMatch(/^[A-Za-z0-9]{10}$/);
-			expect(await store.get(id, 'fp1')).toMatchObject({ ...g, id });
+			expect(await store.get(id, ['fp1'])).toMatchObject({ ...g, id });
 		});
 
 		it("doesn't return a game saved under other rules", async () => {
 			const id = await store.save(game({ fingerprint: 'old' }));
-			expect(await store.get(id, 'fp1')).toBeNull();
-			expect(await store.get('nope', 'fp1')).toBeNull();
+			expect(await store.get(id, ['fp1'])).toBeNull();
+			expect(await store.get('nope', ['fp1'])).toBeNull();
 		});
 
 		it("lists a player's games newest first, from either seat, a page at a time", async () => {
@@ -42,20 +42,30 @@ function storeContract(name: string, open: () => Promise<GameStore>) {
 				ids.push(await store.save(game({ players: { A, B } })));
 				await sleep(5);
 			}
-			const mine = await store.byPlayer('me', 'fp1', 10);
+			const mine = await store.byPlayer('me', ['fp1'], 10);
 			expect(mine.map((g) => g.id)).toEqual([ids[2], ids[1], ids[0]]);
-			const page = await store.byPlayer('me', 'fp1', 2);
+			const page = await store.byPlayer('me', ['fp1'], 2);
 			expect(page).toHaveLength(2);
-			expect((await store.byPlayer('me', 'fp1', 2, page[1].createdAt)).map((g) => g.id)).toEqual([ids[0]]);
-			expect(await store.byPlayer('me', 'other', 10)).toEqual([]);
+			expect((await store.byPlayer('me', ['fp1'], 2, page[1].createdAt)).map((g) => g.id)).toEqual([ids[0]]);
+			expect(await store.byPlayer('me', ['other'], 10)).toEqual([]);
+		});
+
+		it('keeps the games of every current rule set, each under its own fingerprint', async () => {
+			const normal = await store.save(game({ fingerprint: 'normal' }));
+			const advanced = await store.save(game({ fingerprint: 'advanced', record: { ...game().record, rules: 'advanced' } }));
+			const both = ['normal', 'advanced'];
+			expect(await store.get(normal, both)).toMatchObject({ record: { rules: 'normal' } });
+			expect(await store.get(advanced, both)).toMatchObject({ record: { rules: 'advanced' } });
+			expect(await store.get(advanced, ['normal'])).toBeNull();
+			expect((await store.byPlayer('p1', both, 10)).map((g) => g.id)).toEqual(expect.arrayContaining([normal, advanced]));
 		});
 
 		it('deletes games saved under other rules', async () => {
 			const keep = await store.save(game({ fingerprint: 'new' }));
 			await store.save(game({ fingerprint: 'stale' }));
-			expect(await store.deleteOthers('new')).toBeGreaterThanOrEqual(1);
-			expect(await store.get(keep, 'new')).not.toBeNull();
-			expect(await store.byPlayer('p1', 'fp1', 10)).toEqual([]);
+			expect(await store.deleteOthers(['new'])).toBeGreaterThanOrEqual(1);
+			expect(await store.get(keep, ['new'])).not.toBeNull();
+			expect(await store.byPlayer('p1', ['fp1'], 10)).toEqual([]);
 		});
 	});
 }
@@ -105,7 +115,7 @@ describe('getStore', () => {
 		const saved = g[key];
 		delete g[key];
 		try {
-			await expect(getStore('fp', { PGHOST: 'db', PGDATABASE: 'volley', NODE_ENV: 'development' })).rejects.toThrow(
+			await expect(getStore(['fp'], { PGHOST: 'db', PGDATABASE: 'volley', NODE_ENV: 'development' })).rejects.toThrow(
 				/production database/
 			);
 		} finally {

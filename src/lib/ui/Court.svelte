@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { other } from '#lib/engine/rally.ts';
-	import { TARGET, ZONES } from '#lib/engine/rules.ts';
-	import type { Channel, Game, Shot, Stance, TeamId } from '#lib/engine/types.ts';
+	import { LANDING, TARGET, targetOf, tempoIn, ZONES } from '#lib/engine/rules.ts';
+	import type { AttackOption, BlockMode, Channel, Game, Shot, Stance, TeamId, Zone } from '#lib/engine/types.ts';
 	import CalloutView from './Callout.svelte';
 	import type { Frame } from './choreo';
 	import Die from './Die.svelte';
@@ -24,6 +24,7 @@
 	import { paced, reducedMotion } from './pace.svelte';
 	import PlayerChip from './PlayerChip.svelte';
 	import { callout, stepEntries, type Impact } from './story';
+	import { ZONE_WORD, tempoCoverage } from './tempo';
 
 	/**
 	 * Draws the court. Where the players and the ball are comes from `frame` (a moment of the step
@@ -52,10 +53,10 @@
 		glide?: boolean;
 		/** Each die carries the step it was rolled in: earlier ones in the possession stay, faded. `key` changes every step. */
 		dice: { key: number; items: (PlacedDie & { step: number })[] };
-		/** A shot the player is hovering before choosing it: drawn as the intended arrow. */
-		preview?: Shot | null;
+		/** A shot the player is hovering or has picked, before hitting it: drawn as the intended arrow. In advanced mode it has a touch. */
+		preview?: AttackOption | null;
 		/** A defence the player is setting up before locking it in: drawn on the court. */
-		defencePreview?: { block: Channel; stance: Stance } | null;
+		defencePreview?: { block: Channel; stance: Stance; blockMode?: BlockMode } | null;
 		/** Set while it's the player's attack: the target zones become buttons for the three shots. */
 		onshot?: ((shot: Shot) => void) | null;
 		/** Hovering or focusing a target zone previews that shot; null when it stops. */
@@ -73,18 +74,32 @@
 	const TEAMS: TeamId[] = ['A', 'B'];
 	/** Where the players stand for this state, for what's drawn around them (arrows, callouts). */
 	const pos = $derived(
-		defencePreview && !game.attack?.calls ? previewDefence(game, defencePreview.block, defencePreview.stance) : positions(game)
+		defencePreview && !game.attack?.calls ? previewDefence(game, defencePreview) : positions(game)
 	);
 	const a = $derived(game.attack);
 	const defending = $derived(a ? other(a.team) : null);
-	const calledShot = $derived(a?.calls?.shot ?? preview);
-	const target = $derived(calledShot && a ? TARGET[calledShot] : null);
+	/** Advanced mode: the tempo the set made, once there's a set. */
+	const tempo = $derived(a && a.setMod !== undefined ? (a.calls?.touch ? a.calls.tempo : tempoIn(game)) : undefined);
+	const called = $derived(a?.calls ?? preview);
+	const calledShot = $derived(called?.shot ?? null);
+	/** Where the called or previewed shot is aimed: in advanced mode, where its touch lands. */
+	const target = $derived.by((): Zone | null => {
+		if (!a || !called) return null;
+		if (a.calls) return targetOf(a.calls);
+		return called.touch ? LANDING[called.shot as Channel][called.touch] : TARGET[called.shot];
+	});
+	/** Advanced mode: what the defence covers in each corner, once it's called or while the player sets theirs up. */
+	const tempoCovers = $derived.by(() => {
+		const d = a?.calls ?? defencePreview;
+		return tempo && d ? tempoCoverage(tempo, { blockMode: 'commit', ...d }) : null;
+	});
+	const stayDown = $derived(tempo === 'high' && (a?.calls ?? defencePreview)?.blockMode === 'none');
 	/** The shots the attacking side might play: in run mode, a dig over to deep middle too. */
 	const shots = $derived(a && (game.teams[a.team].runKit || game.teams[a.team].playbook) ? [...SHOTS, 'over' as const] : SHOTS);
 	/** What the defence covers, once it's called or while the player sets theirs up. */
 	const covers = $derived.by(() => {
 		const d = a?.calls ?? defencePreview;
-		return d ? coverage(d.block, d.stance) : null;
+		return d && !tempo ? coverage(d.block, d.stance) : null;
 	});
 	/** Where a shot's tag sits: across the top of its target zone, above the player's action label. */
 	const tagAt = (team: TeamId, shot: Shot) => {
@@ -131,7 +146,7 @@
 	const shot = $derived.by(() => {
 		if (!a || !calledShot) return null;
 		const d = other(a.team);
-		const intended = shotPoint(d, TARGET[calledShot], calledShot, bottom);
+		const intended = shotPoint(d, target!, calledShot, bottom);
 		const hitter = zoneCenter(a.team, pos[a.team][a.hitter], bottom);
 		return {
 			from: calledShot === 'line' ? { x: intended.x, y: hitter.y } : hitter,
@@ -142,7 +157,15 @@
 
 	const bar = $derived.by(() => {
 		const block = a?.calls?.block ?? defencePreview?.block;
-		return block && defending ? { ...blockBar(defending, block, bottom), label: block } : null;
+		return block && defending && !stayDown ? { ...blockBar(defending, block, bottom), label: block } : null;
+	});
+	/** Advanced mode, while the player picks a shot: the two lanes, named across the far end of the other court. */
+	const lanes = $derived.by(() => {
+		if (!tempo || !defending || !onshot) return [];
+		return (['line', 'cross'] as const).map((lane) => {
+			const b = zoneBox(defending, LANDING[lane].hard, bottom);
+			return { lane, x: b.x + b.w / 2, y: defending === bottom ? b.y + b.h - 12 : b.y + 28 };
+		});
 	});
 </script>
 
@@ -173,7 +196,21 @@
 			{/each}
 		{/each}
 
-		{#if defending && covers}
+		{#if defending && tempoCovers}
+			{#each tempoCovers as c (c.zone)}
+				{@const b = zoneBox(defending, c.zone, bottom)}
+				{@const far = defending === bottom ? b.y + b.h - 22 : b.y + 22}
+				<rect class="tempo-cover {c.cover} {defending}" x={b.x + 1} y={b.y + 1} width={b.w - 2} height={b.h - 2} />
+				<text class="tempo-tag {c.cover} {defending}" x={b.x + b.w / 2} y={far}>
+					{ZONE_WORD[c.cover]}
+					{#if c.roll}<tspan class="roll" x={b.x + b.w / 2} dy="12">roll: {ZONE_WORD[c.roll]}</tspan>{/if}
+				</text>
+			{/each}
+		{:else if defending && lanes.length}
+			{#each lanes as l (l.lane)}
+				<text class="lane" x={l.x} y={l.y}>{l.lane}</text>
+			{/each}
+		{:else if defending && covers}
 			{#each shots as s (s)}
 				{@const b = zoneBox(defending, TARGET[s], bottom)}
 				{@const tag = tagAt(defending, s)}
@@ -204,6 +241,10 @@
 		{/if}
 
 		<rect class="net" x="8" y={VIEW.netY - 4} width={VIEW.width - 16} height="8" />
+		{#if stayDown && defending}
+			{@const net = blockBar(defending, 'line', bottom)}
+			<text class="block-label" x={zoneCenter(defending, 2, bottom).x} y={net.near ? net.y + 16 : net.y - 4}>pulls off</text>
+		{/if}
 		{#if bar}
 			<rect class="block" x={bar.x} y={bar.y} width={bar.w} height="6" rx="2" />
 			<text class="block-label" x={bar.x + bar.w / 2} y={bar.near ? bar.y + 16 : bar.y - 4}>
@@ -287,7 +328,7 @@
 			<path d="M-6.2 -3.2 Q0 -1 6.2 -3.2 M-4.5 5.3 Q-1 0 0 -7 M4.5 5.3 Q1 0 0 -7" />
 		</g>
 
-		{#if defending && onshot}
+		{#if defending && onshot && !tempo}
 			{#each shots as s (s)}
 				{@const b = zoneBox(defending, TARGET[s], bottom)}
 				<rect
@@ -619,6 +660,63 @@
 	}
 	.cover-tag.pick {
 		fill: var(--muted);
+	}
+	.tempo-cover {
+		opacity: 0.75;
+	}
+	.tempo-cover.blocked {
+		fill: color-mix(in srgb, var(--block) 22%, var(--surface));
+	}
+	.tempo-cover.read.A,
+	.tempo-cover.close.A {
+		fill: var(--team-a-bg);
+	}
+	.tempo-cover.read.B,
+	.tempo-cover.close.B {
+		fill: var(--team-b-bg);
+	}
+	.tempo-cover.close {
+		opacity: 0.4;
+	}
+	.tempo-cover.open {
+		fill: var(--covered-bg);
+	}
+	.tempo-tag {
+		font-size: 10px;
+		font-weight: 800;
+		text-anchor: middle;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		pointer-events: none;
+	}
+	.tempo-tag.blocked {
+		fill: var(--block);
+	}
+	.tempo-tag.read.A,
+	.tempo-tag.close.A {
+		fill: var(--team-a);
+	}
+	.tempo-tag.read.B,
+	.tempo-tag.close.B {
+		fill: var(--team-b);
+	}
+	.tempo-tag.open {
+		fill: var(--covered);
+	}
+	.tempo-tag .roll {
+		font-size: 8px;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+	}
+	.lane {
+		font-size: 13px;
+		font-weight: 800;
+		letter-spacing: 0.14em;
+		text-anchor: middle;
+		text-transform: uppercase;
+		fill: var(--muted);
+		opacity: 0.8;
+		pointer-events: none;
 	}
 	.pick-zone {
 		fill: transparent;

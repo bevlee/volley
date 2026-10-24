@@ -1,7 +1,7 @@
 import { config } from '../engine/config';
 import { other, partner } from '../engine/rally';
-import { firstTouch } from '../engine/rules';
-import type { Game, LogEntry, Phase, Shot, Slot, TeamId } from '../engine/types';
+import { firstTouch, tempoIn } from '../engine/rules';
+import type { Calls, Channel, Game, LogEntry, Phase, Shot, Slot, TeamId, Touch } from '../engine/types';
 import { setGrade, touchGrade } from './grades';
 
 /**
@@ -23,6 +23,20 @@ export const SHOT_PHRASE: Record<Shot, string> = {
 	tip: 'for a tip',
 	over: 'to dig it over deep'
 };
+
+const TOUCH_VERB: Record<Touch, string> = { hard: 'hits it hard', tip: 'tips it short', roll: 'rolls it deep' };
+
+/** Advanced mode: the shot in words, e.g. "tips it short down the line"; a quick ball is a swing. */
+export const touchPhrase = (shot: Channel, touch: Touch, quick = false) =>
+	`${quick ? 'swings quick' : TOUCH_VERB[touch]} ${SHOT_PHRASE[shot]}`;
+
+/** The touch a hit or swing entry was played with, if it's advanced mode's. */
+const touchOf = (d: Data) => (d.touch ? { shot: d.shot as Channel, touch: d.touch as Touch, quick: d.tempo === 'fast' } : null);
+
+/** A soft shot, in any game: a tip, or advanced mode's tip or roll. */
+const softHit = (d: Data | undefined) => d?.shot === 'tip' || d?.touch === 'tip' || d?.touch === 'roll';
+
+const softWord = (d: Data) => (d.touch === 'roll' ? 'roll' : 'tip');
 
 /** One plain word per way a point ends: kill, block or error. */
 const POINT_REASON: Record<string, string> = {
@@ -46,7 +60,10 @@ export function narrate(e: LogEntry): string {
 			return `${touchGrade(Number(d.mod))} pass from ${d.player}`;
 		case 'set':
 			return `${setGrade(Number(d.mod))} set from ${d.player}${d.source === 'touch' ? ' off the block' : ''}`;
+		case 'tempo':
+			return d.tempo === 'fast' ? `Quick ball off a ${setGrade(Number(d.mod))} set · swing now` : 'High ball · time to place it';
 		case 'calls': {
+			if (d.touch) return advancedCalls(d);
 			const hitter = `${d.hitter}${d.special ? ' ★' : ''}`;
 			const blocker = `${d.blocker}${d.defenceSpecial === 'block' ? ' ★' : ''}`;
 			const defender = `${d.defender}${d.defenceSpecial === 'dig' ? ' ★' : ''}`;
@@ -58,9 +75,13 @@ export function narrate(e: LogEntry): string {
 				: `★ ${d.player} is fully charged`;
 		case 'swing':
 			if (d.die === 6) return `${d.player} gets a perfect set and swings`;
-			return d.shot === 'tip' ? `${d.player} tips it into the net` : `${d.player} hits it into the net`;
-		case 'hit':
+			if (d.touch === 'roll') return `${d.player} rolls it into the net`;
+			return softHit(d) ? `${d.player} tips it into the net` : `${d.player} hits it into the net`;
+		case 'hit': {
+			const t = touchOf(d);
+			if (t) return `${d.player} ${touchPhrase(t.shot, t.touch, t.quick)}`;
 			return d.shot === 'tip' ? `${d.player} tips it over the block` : `${d.player} swings ${SHOT_PHRASE[d.shot as Shot]}`;
+		}
 		case 'accuracy':
 			if (d.result === 'exact') return 'Right where they wanted it';
 			if (d.result === 'block') return 'Straight into the block';
@@ -71,14 +92,27 @@ export function narrate(e: LogEntry): string {
 		case 'dig':
 			if (d.up) {
 				const dig = `${touchGrade(firstTouch(Number(d.die)))} dig from ${d.player}`;
+				if (d.outcome === 'close') return `${d.player} scrambles it up · ${dig}`;
 				return d.shot === 'tip' && d.stance === 'short' ? `${dig}, diving for the tip` : dig;
 			}
+			if (d.outcome === 'close') return `${d.player} dives but can't get it up`;
+			if (d.outcome === 'wrong') return `${d.player} went the wrong way`;
 			return d.read ? `${d.player} gets a hand to it but can't control it` : `${d.player} can't get there`;
 		case 'point':
 			return `Point Team ${d.winner} · ${POINT_REASON[d.kind as string] ?? d.kind} · ${d.scoreA}–${d.scoreB}${d.gameOver ? ` · Team ${d.winner} wins the game` : ''}`;
 		default:
 			return e.text;
 	}
+}
+
+/** Advanced mode's calls: the touch, then the block (or pulling off), then the defender if they had time to move. */
+function advancedCalls(d: Data): string {
+	const quick = d.tempo === 'fast';
+	const stayDown = d.blockMode === 'none';
+	const attack = `${d.hitter} ${touchPhrase(d.shot as Channel, d.touch as Touch, quick)}`;
+	const block = stayDown ? `${d.blocker} pulls off the net` : `${d.blocker} takes away the ${d.block}`;
+	const defend = quick ? `${d.defender} has no time to move` : stayDown ? `${d.defender} and ${d.blocker} both dig` : `${d.defender} plays ${d.stance}`;
+	return `${attack} · ${block} · ${defend}`;
 }
 
 /**
@@ -137,11 +171,21 @@ export function callout(g: Game): Callout | null {
 			case 'stuff':
 				return make('Block!', `${block?.player} blocks ${hit?.player}`, point.winner, true, 'slam');
 			case 'kill': {
-				if (hit?.shot === 'tip') {
-					return make('Kill!', dig?.read ? `${dig.player} can't reach the tip` : `${hit.player} tips it in`, point.winner, false, 'tip');
+				// A quick ball the block didn't stop: there's no dig.
+				if (!dig) {
+					const sub = block ? `Through ${block.player}'s block` : `Quick ball · the block went ${g.attack?.calls?.block}`;
+					return make('Kill!', sub, point.winner, true, 'smash');
 				}
-				const margin = Number(dig?.attack) - Number(dig?.total);
-				const sub = dig?.read ? `Too hot for ${dig.player}` : `${dig?.player} out of position`;
+				const scramble = dig.outcome === 'close' ? `${dig.player} dives but can't get it up` : null;
+				if (softHit(hit)) {
+					const word = softWord(hit!);
+					const missed = dig.read ? `${dig.player} can't reach the ${word}` : dig.outcome === 'wrong' ? `${dig.player} went the wrong way` : null;
+					const sub = scramble ?? missed ?? `${hit!.player} ${word === 'roll' ? 'rolls' : 'tips'} it in`;
+					return make('Kill!', sub, point.winner, false, 'tip');
+				}
+				const margin = Number(dig.attack) - Number(dig.total);
+				const sub =
+					scramble ?? (dig.read ? `Too hot for ${dig.player}` : dig.outcome === 'wrong' ? `${dig.player} went the wrong way` : `${dig.player} out of position`);
 				const big = margin >= 8;
 				return make('Kill!', sub, point.winner, big, big ? 'smash' : 'shake');
 			}
@@ -149,6 +193,7 @@ export function callout(g: Game): Callout | null {
 	}
 
 	if (dig?.up) {
+		if (dig.outcome === 'close') return make('Scramble!', `${dig.player} dives. The ball's up.`, dig.team, true, 'shake');
 		if (dig.shot === 'tip' && dig.stance === 'short') return make('Dig!', `${dig.player} dives for the tip`, dig.team, true, 'shake');
 		if (!dig.read) return make('Dig!', `${dig.player} keeps it alive`, dig.team, true, 'shake');
 		const hard = Number(dig.attack) >= 14;
@@ -200,7 +245,12 @@ export function nextAction(g: Game, controlled: TeamId | null = null): string {
 /** Whose call it is, when it's the player's: their attack or their defence. */
 export function prompt(g: Game, controlled: TeamId | null): string | null {
 	const a = g.attack;
-	if (a && needsShot(g, controlled)) return `Your attack · ${g.teams[a.team][a.hitter].name} is hitting`;
+	if (a && needsShot(g, controlled)) {
+		const hitter = g.teams[a.team][a.hitter].name;
+		const tempo = tempoIn(g);
+		if (tempo) return `Your attack · ${hitter} ${tempo === 'fast' ? 'swings hard' : 'places it'}`;
+		return `Your attack · ${hitter} is hitting`;
+	}
 	if (a && needsDefence(g, controlled)) return `Your defence · ${g.teams[a.team][a.hitter].name} is about to attack`;
 	return null;
 }
@@ -248,10 +298,10 @@ export function playerActions(g: Game): Record<string, Action> {
 	const shank = find(entries, 'point')?.kind === 'shank';
 	const actions: Record<string, Action> = {};
 	if (hit) {
-		const tipped = hit.shot === 'tip';
+		const tipped = softHit(hit);
 		// A stuffed spike goes unlabelled: the blocker's "block!" is the moment.
 		const stuffed = block?.result === 'stuff';
-		const label = shank ? 'shank!' : stuffed ? '' : tipped ? 'tip!' : 'spike!';
+		const label = shank ? 'shank!' : stuffed ? '' : tipped ? `${softWord(hit)}!` : 'spike!';
 		actions[`${hit.team}-${hit.slot as Slot}`] = { move: tipped ? 'tip' : 'spike', label };
 	} else if (shank && g.attack) {
 		actions[`${g.attack.team}-${partner(g.attack.hitter)}`] = { move: 'dig', label: 'shank!' };
@@ -285,7 +335,7 @@ export function duels(g: Game): Duel[] {
 	const entries = stepEntries(g);
 	const hit = find(entries, 'hit');
 	if (!hit) return [];
-	const attacker = `${hit.player} ${hit.shot === 'tip' ? 'tip' : 'attack'}`;
+	const attacker = `${hit.player} ${softHit(hit) ? softWord(hit) : 'attack'}`;
 	const base = { attacker, attackTeam: hit.team as TeamId, defenceTeam: other(hit.team as TeamId) };
 	const list: Duel[] = [];
 	const block = find(entries, 'block');
@@ -308,9 +358,20 @@ export function playSummary(g: Game): string | null {
 	const { shot, block, stance } = a.calls;
 	const hitter = g.teams[a.team][a.hitter].name;
 	const defence = g.teams[other(a.team)];
+	if (a.calls.touch) return advancedSummary(a.calls, hitter, defence.blocker.name, defence.defender.name);
 	const attack =
 		shot === 'tip'
 			? `${hitter} tips over the block`
 			: `${hitter} ${SHOT_PHRASE[shot]}, ${shot === block ? 'into' : 'around'} the block`;
 	return `${attack} · ${defence.blocker.name} blocks ${block} · ${defence.defender.name} ${stance}`;
+}
+
+/** Advanced mode's play in one line, e.g. "A1 tips it short down the line, over the block · B1 pulls off · B2 deep". */
+function advancedSummary(calls: Calls, hitter: string, blocker: string, defender: string): string {
+	const { shot, block, stance, touch } = calls;
+	const quick = calls.tempo === 'fast';
+	const stayDown = calls.blockMode === 'none';
+	const past = touch !== 'hard' ? 'over the block' : stayDown ? 'no block' : shot === block ? 'into the block' : 'around the block';
+	const attack = `${hitter} ${touchPhrase(shot as Channel, touch!, quick)}, ${past}`;
+	return `${attack} · ${blocker} ${stayDown ? 'pulls off' : `blocks ${block}`} · ${defender} ${quick ? 'no time to move' : stance}`;
 }

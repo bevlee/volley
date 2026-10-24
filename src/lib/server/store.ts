@@ -30,12 +30,12 @@ export interface StoredGame extends NewGame {
 
 export interface GameStore {
 	save(game: NewGame): Promise<string>;
-	/** A game saved under `fingerprint`, or null. */
-	get(id: string, fingerprint: string): Promise<StoredGame | null>;
-	/** A player's games under `fingerprint`, newest first; `before` pages back from a game's time. */
-	byPlayer(playerId: string, fingerprint: string, limit: number, before?: Date): Promise<StoredGame[]>;
-	/** Deletes every game saved under another fingerprint (the rules changed). Returns how many. */
-	deleteOthers(fingerprint: string): Promise<number>;
+	/** A game saved under one of the `current` fingerprints, or null. */
+	get(id: string, current: readonly string[]): Promise<StoredGame | null>;
+	/** A player's games under the `current` fingerprints, newest first; `before` pages back from a game's time. */
+	byPlayer(playerId: string, current: readonly string[], limit: number, before?: Date): Promise<StoredGame[]>;
+	/** Deletes every game saved under a fingerprint not in `current` (its rules changed). Returns how many. */
+	deleteOthers(current: readonly string[]): Promise<number>;
 	close(): Promise<void>;
 }
 
@@ -57,20 +57,20 @@ export function memoryStore(): GameStore {
 			games.set(id, structuredClone({ ...game, id, createdAt: new Date() }));
 			return id;
 		},
-		async get(id, fingerprint) {
+		async get(id, current) {
 			const g = games.get(id);
-			return g && g.fingerprint === fingerprint ? structuredClone(g) : null;
+			return g && current.includes(g.fingerprint) ? structuredClone(g) : null;
 		},
-		async byPlayer(playerId, fingerprint, limit, before) {
+		async byPlayer(playerId, current, limit, before) {
 			return [...games.values()]
-				.filter((g) => g.fingerprint === fingerprint && playedBy(g, playerId) && (!before || g.createdAt < before))
+				.filter((g) => current.includes(g.fingerprint) && playedBy(g, playerId) && (!before || g.createdAt < before))
 				.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 				.slice(0, limit)
 				.map((g) => structuredClone(g));
 		},
-		async deleteOthers(fingerprint) {
+		async deleteOthers(current) {
 			let n = 0;
-			for (const [id, g] of games) if (g.fingerprint !== fingerprint && games.delete(id)) n++;
+			for (const [id, g] of games) if (!current.includes(g.fingerprint) && games.delete(id)) n++;
 			return n;
 		},
 		async close() {}
@@ -95,7 +95,8 @@ export const MIGRATIONS: string[] = [
 	);
 	create index games_player_a on games (player_a, created_at desc);
 	create index games_player_b on games (player_b, created_at desc);`,
-	`alter table games add column name_a text, add column name_b text;`
+	`alter table games add column name_a text, add column name_b text;`,
+	`alter table games add column rules text not null default 'normal' check (rules in ('normal', 'advanced'));`
 ];
 
 type Sql = postgres.Sql;
@@ -119,6 +120,7 @@ interface Row {
 	version: string;
 	fingerprint: string;
 	seed: string;
+	rules: GameRecord['rules'];
 	calls: GameRecord['calls'];
 	player_a: string | null;
 	player_b: string | null;
@@ -135,7 +137,7 @@ const fromRow = (r: Row): StoredGame => ({
 	mode: r.mode,
 	version: r.version,
 	fingerprint: r.fingerprint,
-	record: { seed: Number(r.seed), calls: r.calls },
+	record: { seed: Number(r.seed), rules: r.rules, calls: r.calls },
 	players: { A: r.player_a, B: r.player_b },
 	names: { A: r.name_a, B: r.name_b },
 	score: { A: r.score_a, B: r.score_b },
@@ -154,6 +156,7 @@ export function postgresStore(sql: Sql = postgres({ max: 5, onnotice: () => {} }
 				version: g.version,
 				fingerprint: g.fingerprint,
 				seed: g.record.seed,
+				rules: g.record.rules,
 				calls: sql.json(g.record.calls as unknown as postgres.JSONValue),
 				player_a: g.players.A,
 				player_b: g.players.B,
@@ -165,22 +168,22 @@ export function postgresStore(sql: Sql = postgres({ max: 5, onnotice: () => {} }
 			})}`;
 			return id;
 		},
-		async get(id, fingerprint) {
-			const [row] = await sql<Row[]>`select * from games where id = ${id} and fingerprint = ${fingerprint}`;
+		async get(id, current) {
+			const [row] = await sql<Row[]>`select * from games where id = ${id} and fingerprint in ${sql(current)}`;
 			return row ? fromRow(row) : null;
 		},
-		async byPlayer(playerId, fingerprint, limit, before) {
+		async byPlayer(playerId, current, limit, before) {
 			const rows = await sql<Row[]>`
 				select * from games
-				where fingerprint = ${fingerprint}
+				where fingerprint in ${sql(current)}
 					and (player_a = ${playerId} or player_b = ${playerId})
 					${before ? sql`and created_at < ${before}` : sql``}
 				order by created_at desc
 				limit ${limit}`;
 			return rows.map(fromRow);
 		},
-		async deleteOthers(fingerprint) {
-			const result = await sql`delete from games where fingerprint <> ${fingerprint}`;
+		async deleteOthers(current) {
+			const result = await sql`delete from games where fingerprint not in ${sql(current)}`;
 			return result.count;
 		},
 		close: () => sql.end()
@@ -191,11 +194,12 @@ const KEY = Symbol.for('volley.store');
 type WithStore = typeof globalThis & { [KEY]?: Promise<GameStore> };
 
 /**
- * The process's store. With Postgres, the first call runs migrations and deletes games from other
- * rules (see `rulesFingerprint`). A dev or test build must not point at the production database:
- * deleting on a rules change there would wipe production's games.
+ * The process's store. With Postgres, the first call runs migrations and deletes games whose rules
+ * have changed: any not under a `current` fingerprint (see `rulesFingerprint`). A dev or test build
+ * must not point at the production database: deleting on a rules change there would wipe
+ * production's games.
  */
-export function getStore(fingerprint: string, env: Record<string, string | undefined> = process.env): Promise<GameStore> {
+export function getStore(current: readonly string[], env: Record<string, string | undefined> = process.env): Promise<GameStore> {
 	const g = globalThis as WithStore;
 	g[KEY] ??= (async () => {
 		if (!env.PGHOST) return memoryStore();
@@ -204,7 +208,7 @@ export function getStore(fingerprint: string, env: Record<string, string | undef
 		const sql = postgres({ max: 5, onnotice: () => {} });
 		await migrate(sql);
 		const store = postgresStore(sql);
-		const deleted = await store.deleteOthers(fingerprint);
+		const deleted = await store.deleteOthers(current);
 		if (deleted) console.log(`Deleted ${deleted} games saved under other rules`);
 		return store;
 	})();

@@ -7,6 +7,7 @@ export function summary(g: StoredGame, viewer: string | null) {
 	return {
 		id: g.id,
 		mode: g.mode,
+		rules: g.record.rules,
 		version: g.version,
 		playedAt: g.createdAt.toISOString(),
 		score: g.score,

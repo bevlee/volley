@@ -1,7 +1,7 @@
 import { config } from '../engine/config';
 import { other, partner } from '../engine/rally';
-import { defenderZone, GRID, isRead, TARGET, ZONES } from '../engine/rules';
-import type { Channel, Game, Roll, Shot, Slot, Stance, TeamId, Zone } from '../engine/types';
+import { CORNER, defenderZone, GRID, isRead, TARGET, tempoIn, ZONES } from '../engine/rules';
+import type { BlockMode, Channel, Game, Roll, Shot, Slot, Stance, TeamId, Tempo, Zone } from '../engine/types';
 import { stepEntries } from './story';
 import type { FlightKind } from './timing';
 
@@ -98,9 +98,9 @@ export function positions(g: Game): Positions {
 	}
 	if (a.calls) {
 		const defending = other(a.team);
-		pos[defending].blocker = 2;
+		pos[defending] = defenceSpots(a.calls.touch && a.calls.tempo, a.calls);
 		// After a block touch the defender runs in to set the ball coming off the block.
-		pos[defending].defender = phase.kind === 'touched' ? SET_SPOT : defenderZone(a.calls.stance, a.calls.block);
+		if (phase.kind === 'touched') pos[defending].defender = SET_SPOT;
 	}
 	// A free ball mid-rally (an easy ball over) keeps the attack's picture, except that the passer
 	// drops back to pass as it comes over, so the ball flies straight to them.
@@ -115,12 +115,23 @@ export function positions(g: Game): Positions {
 const passSpot = (pos: Positions, team: TeamId, slot: Slot): Zone =>
 	pos[team][partner(slot)] === RECEIVE[slot] ? 6 : RECEIVE[slot];
 
+/**
+ * Where the defending pair stand for a defence: the blocker at the net, the defender on their spot.
+ * In advanced mode (`tempo` set) the defender plays a corner, a quick ball leaves them no time to
+ * move, and a blocker who pulls off drops off the net to dig too.
+ */
+export function defenceSpots(tempo: Tempo | undefined, d: { block: Channel; stance: Stance; blockMode?: BlockMode }): Record<Slot, Zone> {
+	if (!tempo) return { blocker: 2, defender: defenderZone(d.stance, d.block) };
+	if (tempo === 'fast') return { blocker: 2, defender: READY.defender };
+	if (d.blockMode === 'none') return { blocker: SET_SPOT, defender: READY.defender };
+	return { blocker: 2, defender: CORNER[d.block][d.stance] };
+}
+
 /** Where everyone stands while the player is choosing a defence: the defending pair on the chosen spots. */
-export function previewDefence(g: Game, block: Channel, stance: Stance): Positions {
+export function previewDefence(g: Game, d: { block: Channel; stance: Stance; blockMode?: BlockMode }): Positions {
 	const pos = positions(g);
 	if (!g.attack) return pos;
-	const defending = other(g.attack.team);
-	pos[defending] = { blocker: 2, defender: defenderZone(stance, block) };
+	pos[other(g.attack.team)] = defenceSpots(tempoIn(g), d);
 	return pos;
 }
 
@@ -256,9 +267,13 @@ export function ballVia(g: Game, pos: Positions, bottom: TeamId = 'A'): Point | 
 	return null;
 }
 
-/** A held ball sits at the top corner of the holder's chip. */
+/**
+ * A held ball sits at the top corner of the holder's chip, on the side they hit from: attacks come
+ * from the hitter's left, which is the screen's left for the bottom team and its right for the top.
+ */
 const HELD = { x: 34, y: -20 };
-const held = (p: Point): Point => ({ x: p.x + HELD.x, y: p.y + HELD.y });
+const heldX = (p: Point) => p.x + (p.y > VIEW.netY ? -HELD.x : HELD.x);
+const held = (p: Point): Point => ({ x: heldX(p), y: p.y + HELD.y });
 
 /**
  * Where the ball is drawn when play stops on `g`: held by whoever has it, landed in a zone (on the
@@ -271,7 +286,7 @@ export function ballRest(g: Game, pos: Positions, bottom: TeamId = 'A'): Point {
 	const a = g.attack;
 	if (how === 'dropped' && a) {
 		const setter = zoneCenter(a.team, pos[a.team][partner(a.hitter)], bottom);
-		return { x: setter.x + HELD.x, y: setter.y + 26 };
+		return { x: heldX(setter), y: setter.y + 26 };
 	}
 	if (a?.calls && a.landing && g.phase.kind !== 'touched') {
 		const zone = zoneCenter(other(a.team), a.landing, bottom);
@@ -312,7 +327,8 @@ export function flightKind(g: Game): FlightKind {
 	const hit = entries.find((e) => e.tag === 'hit' || e.tag === 'swing');
 	if (hit) {
 		if (entries.some((e) => e.tag === 'accuracy' && e.data?.result === 'easy')) return 'lob';
-		return hit.data?.shot === 'tip' ? 'tip' : 'spike';
+		const soft = hit.data?.shot === 'tip' || hit.data?.touch === 'tip' || hit.data?.touch === 'roll';
+		return soft ? 'tip' : 'spike';
 	}
 	return entries.some((e) => e.tag === 'serve') ? 'serve' : 'lob';
 }

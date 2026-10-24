@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { other } from '#lib/engine/rally.ts';
-	import type { TeamId } from '#lib/engine/types.ts';
+	import type { Rules, TeamId } from '#lib/engine/types.ts';
 	import { playerId } from '#lib/online/identity.ts';
 	import Menu from '#lib/ui/Menu.svelte';
 
@@ -9,6 +9,7 @@
 	interface Summary {
 		id: string;
 		mode: 'online' | 'computer';
+		rules: Rules;
 		playedAt: string;
 		score: Record<TeamId, number>;
 		winner: TeamId;
@@ -58,7 +59,7 @@
 	{#each games as g (g.id)}
 		<a class="choice" href="/replay/{g.id}">
 			<b>{result(g)} vs {opponent(g)}</b>
-			<span>{g.mode === 'online' ? 'Online' : 'vs computer'} · {when(g.playedAt)}</span>
+			<span>{g.mode === 'online' ? 'Online' : g.rules === 'advanced' ? 'Advanced vs computer' : 'vs computer'} · {when(g.playedAt)}</span>
 		</a>
 	{/each}
 	{#if loading}

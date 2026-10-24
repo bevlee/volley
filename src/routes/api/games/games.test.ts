@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { randomChoosers } from '#lib/engine/choosers.ts';
 import { newGame, playGame } from '#lib/engine/rally.ts';
 import { recordGame } from '#lib/engine/replay.ts';
-import { FINGERPRINT } from '#lib/server/build.ts';
+import { FINGERPRINTS } from '#lib/server/build.ts';
+import { withRules } from '#lib/engine/config.ts';
+import type { Rules } from '#lib/engine/types.ts';
 import { parseUpload, rateLimiter } from '#lib/server/uploads.ts';
 import { GET as getOne } from './[id]/+server.ts';
 import { GET as list, POST } from './+server.ts';
@@ -10,10 +12,12 @@ import { GET as list, POST } from './+server.ts';
 const ME = crypto.randomUUID();
 
 /** A finished game against the computer, played entirely by the computer, as the browser would upload it. */
-function upload(seed = 11, over: Record<string, unknown> = {}) {
-	const game = playGame(newGame(seed), randomChoosers);
-	const calls = game.log.filter((e) => e.tag === 'calls').map(() => ({ shot: true, defence: true }));
-	return { ...recordGame(game, calls), fingerprint: FINGERPRINT, playerId: ME, team: 'A', ...over };
+function upload(seed = 11, over: Record<string, unknown> = {}, rules: Rules = 'normal') {
+	return withRules(rules, () => {
+		const game = playGame(newGame(seed), randomChoosers);
+		const calls = game.log.filter((e) => e.tag === 'calls').map(() => ({ shot: true, defence: true }));
+		return { ...recordGame(game, calls), fingerprint: FINGERPRINTS[rules], playerId: ME, team: 'A', ...over };
+	});
 }
 
 let address = 0;
@@ -44,8 +48,27 @@ describe('uploading a game against the computer', () => {
 		expect(history.games[0]).toMatchObject({ id, mode: 'computer', you: 'A', score: final.score, sides: { A: 'player', B: 'computer' } });
 
 		const one = await (await call(getOne, { url: `/api/games/${id}?player=${ME}`, params: { id } })).json();
-		expect(one.record).toEqual({ seed: body.seed, calls: body.calls });
+		expect(one.record).toEqual({ seed: body.seed, rules: 'normal', calls: body.calls });
 		expect(JSON.stringify(one)).not.toContain(ME);
+	});
+
+	it('saves an advanced game as advanced, and it replays under advanced rules', async () => {
+		const body = upload(21, {}, 'advanced');
+		expect(body.calls.some((c) => c.touch)).toBe(true);
+		const res = await call(POST, { body });
+		expect(res.status).toBe(201);
+		const { id } = await res.json();
+		const final = withRules('advanced', () => playGame(newGame(21), randomChoosers));
+
+		const history = await (await call(list, { url: `/api/games?player=${ME}` })).json();
+		expect(history.games[0]).toMatchObject({ id, mode: 'computer', rules: 'advanced', score: final.score });
+		const one = await (await call(getOne, { url: `/api/games/${id}?player=${ME}`, params: { id } })).json();
+		expect(one.record).toEqual({ seed: 21, rules: 'advanced', calls: body.calls });
+	});
+
+	it('refuses an advanced game sent with the normal fingerprint, and a normal one sent as advanced', async () => {
+		expect((await call(POST, { body: upload(22, { fingerprint: FINGERPRINTS.normal }, 'advanced') })).status).toBe(409);
+		expect((await call(POST, { body: upload(23, { rules: 'advanced' }) })).status).toBe(409);
 	});
 
 	it('refuses a game that was tampered with', async () => {
@@ -100,9 +123,16 @@ describe('parseUpload', () => {
 		['a call with a bad shot', { calls: [{ shot: 'smash', block: 'line', stance: 'deep', byComputer: { shot: true, defence: true } }] }, 'Bad calls'],
 		['a call missing who made it', { calls: [{ shot: 'line', block: 'line', stance: 'deep' }] }, 'Bad calls'],
 		['a short playerId', { playerId: 'abc' }, 'Bad playerId'],
-		['a bad team', { team: 'C' }, 'Bad team']
+		['a bad team', { team: 'C' }, 'Bad team'],
+		['unknown rules', { rules: 'specials' }, 'Bad rules'],
+		['a call with a bad touch', { calls: [{ shot: 'line', block: 'line', stance: 'deep', touch: 'smash', byComputer: { shot: true, defence: true } }] }, 'Bad calls']
 	])('refuses %s', (_, change, message) => {
 		expect(parseUpload(change === null ? null : { ...good(), ...change })).toBe(message);
+	});
+
+	it('reads a page that sends no rules as a normal game', () => {
+		const { rules: _, ...body } = good();
+		expect(parseUpload(body)).toMatchObject({ record: { rules: 'normal' } });
 	});
 
 	it('keeps only the fields it knows', () => {

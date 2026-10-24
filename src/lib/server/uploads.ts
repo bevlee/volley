@@ -1,5 +1,5 @@
 import type { GameRecord, RecordedCall } from '../engine/replay';
-import type { TeamId } from '../engine/types';
+import type { Rules, TeamId } from '../engine/types';
 import { cleanName } from '../online/names';
 
 /**
@@ -27,15 +27,19 @@ export interface Upload {
 	name: string | null;
 }
 
+const RULES: readonly Rules[] = ['normal', 'advanced'];
+
 const oneOf = <T extends string>(v: unknown, values: readonly T[]): v is T => values.includes(v as T);
 
 function isCall(c: unknown): c is RecordedCall {
 	if (typeof c !== 'object' || c === null) return false;
-	const { shot, block, stance, byComputer: by } = c as Record<string, unknown>;
+	const { shot, block, stance, touch, blockMode, byComputer: by } = c as Record<string, unknown>;
 	return (
 		oneOf(shot, ['line', 'cross', 'tip']) &&
 		oneOf(block, ['line', 'cross']) &&
 		oneOf(stance, ['deep', 'short']) &&
+		(touch === undefined || oneOf(touch, ['hard', 'tip', 'roll'])) &&
+		(blockMode === undefined || oneOf(blockMode, ['commit', 'read', 'none'])) &&
 		typeof by === 'object' &&
 		by !== null &&
 		typeof (by as Record<string, unknown>).shot === 'boolean' &&
@@ -46,19 +50,23 @@ function isCall(c: unknown): c is RecordedCall {
 /** An upload in the right shape, or why not. It still has to replay before it's saved. */
 export function parseUpload(body: unknown): Upload | string {
 	if (typeof body !== 'object' || body === null) return 'Expected a JSON object';
-	const { seed, calls, fingerprint, playerId, team, name } = body as Record<string, unknown>;
+	// Pages from before advanced mode send no rules: their games are normal.
+	const { seed, rules = 'normal', calls, fingerprint, playerId, team, name } = body as Record<string, unknown>;
 	if (!Number.isSafeInteger(seed) || (seed as number) < 0 || (seed as number) >= 2 ** 32) return 'Bad seed';
+	if (!oneOf(rules, RULES)) return 'Bad rules';
 	if (!Array.isArray(calls) || calls.length > MAX_CALLS || !calls.every(isCall)) return 'Bad calls';
 	if (typeof fingerprint !== 'string' || fingerprint.length > 32) return 'Bad fingerprint';
 	if (!isPlayerId(playerId)) return 'Bad playerId';
 	if (!isTeam(team)) return 'Bad team';
-	const clean = calls.map(({ shot, block, stance, byComputer }) => ({
+	const clean = calls.map(({ shot, block, stance, touch, blockMode, byComputer }) => ({
 		shot,
 		block,
 		stance,
+		...(touch && { touch }),
+		...(blockMode && { blockMode }),
 		byComputer: { shot: byComputer.shot, defence: byComputer.defence }
 	}));
-	return { record: { seed: seed as number, calls: clean }, fingerprint, playerId, team, name: cleanName(name) || null };
+	return { record: { seed: seed as number, rules, calls: clean }, fingerprint, playerId, team, name: cleanName(name) || null };
 }
 
 /**

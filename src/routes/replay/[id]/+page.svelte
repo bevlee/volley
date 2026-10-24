@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import type { GameRecord } from '#lib/engine/replay.ts';
-	import type { Game, TeamId } from '#lib/engine/types.ts';
+	import { config } from '#lib/engine/config.ts';
+	import type { Game, Rules, TeamId } from '#lib/engine/types.ts';
 	import { playerId } from '#lib/online/identity.ts';
 	import GameScreen from '#lib/ui/GameScreen.svelte';
 	import Menu from '#lib/ui/Menu.svelte';
@@ -16,6 +17,7 @@
 
 	interface Saved {
 		mode: 'online' | 'computer';
+		rules: Rules;
 		playedAt: string;
 		score: Record<TeamId, number>;
 		you: TeamId | null;
@@ -38,15 +40,21 @@
 		saved = null;
 		failed = null;
 		auto = false;
+		// Leaving before the game loads mustn't switch the next page's rules.
+		let left = false;
 		fetch(`/api/games/${encodeURIComponent(id ?? '')}?player=${encodeURIComponent(playerId())}`)
 			.then(async (res) => {
 				if (res.status === 404) throw new Error('This game isn’t saved any more. Games are cleared when the rules change.');
 				if (!res.ok) throw new Error(`Couldn’t load the game (${res.status}).`);
 				const game: Saved = await res.json();
+				if (left) return;
+				// The court and controls read the rules too, not just the replay (the layout puts them back on the way out).
+				config.advanced = game.record.rules === 'advanced';
 				playback = replayer(game.record);
 				saved = game;
 			})
 			.catch((e: Error) => (failed = e.message));
+		return () => (left = true);
 	});
 
 	const names = $derived(
@@ -56,6 +64,7 @@
 		}
 	);
 	const over = $derived(shown?.phase.kind === 'gameOver');
+	const against = $derived(saved?.mode === 'online' ? 'online' : saved?.rules === 'advanced' ? 'advanced vs computer' : 'vs computer');
 
 	/** Plays to where the live game next waited. */
 	function advance() {
@@ -115,7 +124,7 @@
 	>
 		{#snippet banner()}
 			<div class="replay">
-				<span class="what">Replay · {saved!.mode === 'online' ? 'online' : 'vs computer'} · {when(saved!.playedAt)}</span>
+				<span class="what">Replay · {against} · {when(saved!.playedAt)}</span>
 				<span class="buttons">
 					<button onclick={() => (auto = !auto)} disabled={over} aria-pressed={auto}>{auto ? 'Pause' : 'Play'}</button>
 					<button onclick={nextPoint} disabled={over}>Next point</button>

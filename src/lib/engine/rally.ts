@@ -192,7 +192,8 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				team: other(dug.team),
 				hitter: 'defender',
 				source: 'dig',
-				dugAt: rules.defenderAt(dug.calls!),
+				// Pulling off (advanced mode), nobody is on a corner: the defender digs from deep middle.
+				dugAt: dug.calls!.touch && dug.calls!.blockMode === 'none' ? 6 : rules.defenderAt(dug.calls!),
 				firstDie: die,
 				// Libero instincts: a dig that comes up sets up a better attack.
 				firstMod: rules.firstTouch(
@@ -267,7 +268,7 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const stayDown = touch && a.calls.blockMode === 'none';
 			const stanceText = tempo === 'fast' || stayDown ? '' : `, defender ${a.calls.stance}`;
 			log(
-				`Calls · ${a.team} ${attackText}${a.calls.special ? ' (special)' : ''} · ${defending} ${stayDown ? 'stays down' : `blocks ${a.calls.block}`}${stanceText}${a.calls.defenceSpecial ? ` (special ${a.calls.defenceSpecial})` : ''}`,
+				`Calls · ${a.team} ${attackText}${a.calls.special ? ' (special)' : ''} · ${defending} ${stayDown ? 'pulls off' : `blocks ${a.calls.block}`}${stanceText}${a.calls.defenceSpecial ? ` (special ${a.calls.defenceSpecial})` : ''}`,
 				'calls',
 				{
 					...a.calls,
@@ -296,12 +297,13 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			a.powerDie = powerDie;
 			// A dig over isn't a swing: no hitting error and no unstoppable hit.
 			const over = calls.shot === 'over';
+			const touchData: Record<string, string> = calls.touch ? { touch: calls.touch, tempo: calls.tempo! } : {};
 			if (!over && rules.isShank(a.setDie!, powerDie)) {
-				log(`${hitter.name} swings · d6 1`, 'swing', { player: hitter.name, team: a.team, slot: a.hitter, shot: calls.shot, die: 1 });
+				log(`${hitter.name} swings · d6 1`, 'swing', { player: hitter.name, team: a.team, slot: a.hitter, shot: calls.shot, ...touchData, die: 1 });
 				return scorePoint(g, other(a.team), 'shank', 'two natural 1s');
 			}
 			if (!over && rules.isGuaranteedKill(a.setDie!, powerDie)) {
-				log(`${hitter.name} swings · d6 6`, 'swing', { player: hitter.name, team: a.team, slot: a.hitter, shot: calls.shot, die: 6 });
+				log(`${hitter.name} swings · d6 6`, 'swing', { player: hitter.name, team: a.team, slot: a.hitter, shot: calls.shot, ...touchData, die: 6 });
 				// No aim roll: an unstoppable hit lands where it was called.
 				a.landing = target;
 				return scorePoint(g, a.team, 'guaranteed kill', '6 on the set, 6 on the hit');
@@ -321,6 +323,7 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				slot: a.hitter,
 				player: hitter.name,
 				shot: calls.shot,
+				...touchData,
 				attack: a.incoming!
 			});
 			const powerText = `${hitter.attack} + ${powerDie}${plus(setPower)}${special ? ` + ${special} special` : ''}${heavy ? ` + ${config.abilities.heavyHitterPower} heavy` : ''}${lineBoost ? ` + ${lineBoost} ability` : ''} = ${power}`;
@@ -340,7 +343,6 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			/** The block roll. True when it ends the attack: a stuff scores, and a touch is the blocking side's first contact. */
 			const blocks = (base: number, mode: BlockMode, intoBlock: boolean): boolean => {
 				const die = roll(defending, 'blocker', 'block');
-				// Wall commits harder.
 				const bonus =
 					base +
 					(mode === 'commit' && rules.has(blocker, 'wall') ? config.abilities.wallBlock : 0) +

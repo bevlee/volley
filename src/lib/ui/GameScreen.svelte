@@ -2,20 +2,24 @@
 	import { untrack, type Snippet } from 'svelte';
 	import { config } from '#lib/engine/config.ts';
 	import { other } from '#lib/engine/rally.ts';
-	import { attackOptionsIn, blockModesFor, SHOTS } from '#lib/engine/rules.ts';
-	import type { AttackOption, BlockMode, Channel, DefenceSpecial, Game, Shot, Stance, TeamId, Tempo } from '#lib/engine/types.ts';
+	import { attackOptionsIn, blockModesFor, SHOTS, tempoIn } from '#lib/engine/rules.ts';
+	import type { AttackOption, BlockMode, Channel, DefenceSpecial, Game, Shot, Stance, TeamId, Tempo, Touch } from '#lib/engine/types.ts';
 	import BuildUp from './BuildUp.svelte';
 	import Controls from './Controls.svelte';
 	import Court from './Court.svelte';
 	import Rules from './Rules.svelte';
 	import Settings from './Settings.svelte';
 	import ScoreLine from './ScoreLine.svelte';
+	import TempoBanner from './TempoBanner.svelte';
+	import TempoControls from './TempoControls.svelte';
+	import TempoReveal from './TempoReveal.svelte';
 	import TopBar from './TopBar.svelte';
 	import { choreograph, fullTrails, holdAfter, sample, still, type Frame, type Timeline } from './choreo.ts';
 	import { placeDice, positions, previewDefence, type PlacedDie, type Positions } from './layout.ts';
 	import { clearsSheet, scoreSheet, type ScoreSheet } from './scores.ts';
 	import { commentary, needsDefence, needsShot, nextAction, prompt, quietLine, statusLine, stepEntries } from './story.ts';
 	import { pace, paced, PACES, reducedMotion } from './pace.svelte.ts';
+	import { nextReveal, tempoBanner, type Reveal } from './tempo.ts';
 
 	/**
 	 * The court and everything around it, for one game. It doesn't step the engine: whoever runs the
@@ -73,8 +77,11 @@
 		overDisabled?: boolean;
 		/** Space or the step button when there's no call to make: serve, play on, next rally. */
 		onadvance: () => void;
-		/** `tempo` when set tempos are in play; `special` when the hitter spends a charge (the ?specials prototype). */
-		onshot: (shot: Shot, extra?: { tempo?: Tempo; special?: boolean }) => void;
+		/**
+		 * `tempo` when set tempos are in play; `touch` in advanced mode; `special` when the hitter spends
+		 * a charge (the ?specials prototype).
+		 */
+		onshot: (shot: Shot, extra?: { tempo?: Tempo; touch?: Touch; special?: boolean }) => void;
 		/** `blockMode` when block modes are in play; `spend` when the blocker or digger spends a charge (the ?specials prototype). */
 		ondefence: (defence: { block: Channel; stance: Stance; blockMode?: BlockMode; spend?: DefenceSpecial }) => void;
 		/** The game-over button. */
@@ -111,7 +118,7 @@
 	shown = start;
 	const view = $derived(shown ?? start);
 	/** The shot the player is hovering, previewed on the court. */
-	let preview = $state<Shot | null>(null);
+	let preview = $state<AttackOption | null>(null);
 	/** The shot the player has picked for their attack; Space hits it. Kept between attacks as their default. */
 	let shotPick = $state<AttackOption>({ shot: 'line' });
 	/** The defence the player is setting up; kept between rallies as their default. */
@@ -137,6 +144,16 @@
 	});
 	const choosing = $derived(needsShot(view, controlled) && view === game && !locked);
 	/**
+	 * Advanced mode, for this game's whole run (each page sets the rules before it opens): the tempo
+	 * banner, and once there's a set, the tempo it made.
+	 */
+	const advanced = config.advanced;
+	const tempo = $derived(advanced && view.attack?.setMod !== undefined ? tempoIn(view) : undefined);
+	/** Advanced mode: how the player plays a high ball over. Kept between attacks, like the shot. */
+	let how = $state<Touch>('hard');
+	/** The attack Space hits: on a quick ball it's always hard. */
+	const picked = $derived<AttackOption>(tempo ? { shot: shotPick.shot, touch: tempo === 'fast' ? 'hard' : how } : shotPick);
+	/**
 	 * The attacks the player can pick from: the hitter's options when tempos or run rules are in play
 	 * (their abilities, the set), or the three shots of a normal game.
 	 */
@@ -156,7 +173,7 @@
 	const samePick = (x: AttackOption, y: AttackOption) => x.shot === y.shot && x.tempo === y.tempo;
 	// A pick from an earlier attack that this hitter can't make falls back to their first option.
 	$effect(() => {
-		if (choosing && choices.length && !choices.some((c) => samePick(c, shotPick))) shotPick = { shot: choices[0].shot, tempo: choices[0].tempo };
+		if (!tempo && choosing && choices.length && !choices.some((c) => samePick(c, shotPick))) shotPick = { shot: choices[0].shot, tempo: choices[0].tempo };
 	});
 	/** How the player's blocker can play it, when block modes are in play; null otherwise. */
 	const modes = $derived.by((): BlockMode[] | null => {
@@ -167,6 +184,12 @@
 		if (modes && !modes.includes(defence.blockMode)) defence.blockMode = 'commit';
 	});
 	const defending = $derived(needsDefence(view, controlled) && view === game && !locked);
+	/** Advanced mode: what the block and the dig did to the latest hit (see nextReveal). */
+	let revealed = $state.raw<Reveal | null>(null);
+	$effect(() => {
+		if (!advanced) return;
+		revealed = nextReveal(untrack(() => revealed), view);
+	});
 	/** The latest attack's numbers. They stay up after the attack, until a new possession or rally starts (see clearsSheet). */
 	let sheet = $state.raw<ScoreSheet | null>(null);
 	$effect(() => {
@@ -212,7 +235,7 @@
 	});
 
 	/** Where the players stand at rest: the defending pair on the spots the player is choosing. */
-	const restPositions = $derived(defending ? previewDefence(court, defence.block, defence.stance) : positions(court));
+	const restPositions = $derived(defending ? previewDefence(court, defence) : positions(court));
 	const frame = $derived(live ?? still(court, restPositions, bottom));
 
 	/** The banner's and dock's heights, measured, so the court shrinks to keep the controls on screen. */
@@ -346,7 +369,7 @@
 		ondefence({
 			block: defence.block,
 			stance: defence.stance,
-			...(modes && { blockMode: defence.blockMode }),
+			...((modes || tempo === 'high') && { blockMode: defence.blockMode }),
 			...(charges && { spend: has[spend] ? spend : 'none' })
 		});
 		spend = 'none';
@@ -355,7 +378,7 @@
 	function attack() {
 		if (!choosing) return;
 		preview = null;
-		onshot(shotPick.shot, { tempo: shotPick.tempo, special: special && !!charges?.hitterPips });
+		onshot(picked.shot, { tempo: shotPick.tempo, touch: picked.touch, special: special && !!charges?.hitterPips });
 		special = false;
 	}
 
@@ -379,6 +402,27 @@
 
 	const SHOT_KEYS: Record<string, Shot> = { l: 'line', c: 'cross', t: 'tip' };
 
+	/** Advanced mode's keys: where and how to attack (how only on a high ball), and the block, pulling off and the dig. */
+	const TEMPO_ATTACK_KEYS: Record<string, () => void> = {
+		'1': () => (shotPick = { shot: 'line' }),
+		l: () => (shotPick = { shot: 'line' }),
+		'2': () => (shotPick = { shot: 'cross' }),
+		c: () => (shotPick = { shot: 'cross' }),
+		'3': () => tempo === 'high' && (how = 'hard'),
+		h: () => tempo === 'high' && (how = 'hard'),
+		'4': () => tempo === 'high' && (how = 'tip'),
+		t: () => tempo === 'high' && (how = 'tip'),
+		'5': () => tempo === 'high' && (how = 'roll'),
+		r: () => tempo === 'high' && (how = 'roll')
+	};
+	const TEMPO_DEFENCE_KEYS: Record<string, () => void> = {
+		'1': () => (defence = { ...defence, block: 'line', blockMode: 'commit' }),
+		'2': () => (defence = { ...defence, block: 'cross', blockMode: 'commit' }),
+		'9': () => tempo === 'high' && (defence.blockMode = 'none'),
+		'3': () => tempo === 'high' && defence.blockMode !== 'none' && (defence.stance = 'deep'),
+		'4': () => tempo === 'high' && defence.blockMode !== 'none' && (defence.stance = 'short')
+	};
+
 	/** Space or → steps, unless you're typing in a box or a button already has focus. */
 	function onkeydown(e: KeyboardEvent) {
 		if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
@@ -399,18 +443,23 @@
 			if (on === 'block' ? charges.blockerPips : charges.diggerPips) spend = spend === on ? 'none' : on;
 			return;
 		}
+		const tempoKey = tempo && (choosing ? TEMPO_ATTACK_KEYS : defending ? TEMPO_DEFENCE_KEYS : null)?.[e.key.toLowerCase()];
+		if (tempoKey) {
+			e.preventDefault();
+			return tempoKey();
+		}
 		// Number keys pick the attacks in order; L, C and T pick by shot.
 		const numbered = choices[Number(e.key) - 1];
-		if (choosing && /^[1-9]$/.test(e.key) && numbered) {
+		if (!tempo && choosing && /^[1-9]$/.test(e.key) && numbered) {
 			e.preventDefault();
 			return choose(numbered);
 		}
 		const shot = SHOT_KEYS[e.key.toLowerCase()];
-		if (shot && choosing) {
+		if (shot && choosing && !tempo) {
 			e.preventDefault();
 			return chooseShot(shot);
 		}
-		if (defending && DEFENCE_KEYS[e.key]) {
+		if (defending && !tempo && DEFENCE_KEYS[e.key]) {
 			e.preventDefault();
 			return DEFENCE_KEYS[e.key]();
 		}
@@ -436,7 +485,12 @@
 	style:--court-min={bannerH + dockH ? '200px' : undefined}
 >
 	<TopBar game={view} {you} {names} {opponent} {debugOpen} onhelp={() => rules.toggle()} onsettings={() => settings.toggle()} {ondebug} {onleave} />
-	{#if banner}<div bind:clientHeight={bannerH}>{@render banner()}</div>{/if}
+	{#if banner || advanced}
+		<div bind:clientHeight={bannerH}>
+			{@render banner?.()}
+			{#if advanced}<TempoBanner banner={tempoBanner(view, controlled)} />{/if}
+		</div>
+	{/if}
 	<Court
 		game={court}
 		{frame}
@@ -445,10 +499,10 @@
 		glide={!live}
 		{dice}
 		{bottom}
-		preview={choosing ? (preview ?? shotPick.shot) : null}
+		preview={choosing ? (preview ?? picked) : null}
 		defencePreview={defending ? defence : null}
 		onshot={choosing ? chooseShot : null}
-		onpreview={(s) => (preview = s)}
+		onpreview={(s) => (preview = s && { shot: s })}
 	/>
 	{#if dock}<div bind:clientHeight={dockH}>{@render dock()}</div>{/if}
 	<Controls
@@ -467,7 +521,9 @@
 		pick={shotPick}
 		onpick={choose}
 		onattack={attack}
-		onpreview={(s) => (preview = s)}
+		onpreview={(o) => (preview = o)}
+		calls={tempo && view.attack ? tempoCalls : null}
+		reveal={advanced && revealed ? revealSnippet : null}
 		over={view.phase.kind === 'gameOver'}
 		next={stepLabel ?? nextAction(busy ? heading : view, controlled)}
 		{busy}
@@ -480,6 +536,30 @@
 	<BuildUp game={view} />
 	<ScoreLine {sheet} bind:this={scoreLine} />
 </main>
+{#snippet tempoCalls()}
+	{@const a = view.attack!}
+	{@const theirs = view.teams[other(a.team)]}
+	{@const defendingTeam = other(a.team)}
+	<TempoControls
+		kind={choosing ? 'attack' : 'defence'}
+		tempo={tempo!}
+		setMod={a.setMod!}
+		where={shotPick.shot === 'cross' ? 'cross' : 'line'}
+		{how}
+		hitter={view.teams[a.team][a.hitter].name}
+		blocker={theirs.blocker.name}
+		defender={theirs.defender.name}
+		team={choosing ? a.team : defendingTeam}
+		bind:defence
+		onwhere={(shot) => (shotPick = { shot })}
+		onhow={(touch) => (how = touch)}
+		onpreview={(o) => (preview = o)}
+		ongo={choosing ? attack : setDefence}
+	/>
+{/snippet}
+{#snippet revealSnippet()}
+	<TempoReveal reveal={revealed!} />
+{/snippet}
 <Rules bind:this={rules} />
 <Settings bind:this={settings} />
 

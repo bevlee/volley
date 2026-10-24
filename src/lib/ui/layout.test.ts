@@ -1,3 +1,4 @@
+import { config } from '../engine/config';
 import { describe, expect, it } from 'vitest';
 import { NUMBERED } from '../engine/lineup';
 import { fixedChoosers } from '../engine/choosers';
@@ -6,7 +7,7 @@ import type { Game } from '../engine/types';
 import { scriptedDice } from '../engine/rng';
 
 /** A held ball is drawn at the top corner of the holder's chip. */
-const held = (p: { x: number; y: number }) => ({ x: p.x + 34, y: p.y - 20 });
+const held = (p: { x: number; y: number }) => ({ x: p.x + (p.y > 280 ? -34 : 34), y: p.y - 20 });
 import { arcPath, arcPoint, ballAt, ballRest, ballVia, blockBar, calloutTop, coverage, flightKind, halfBox, shotPoint, previewDefence, placeDice, positions, rollBall, rollPositions, roleOf, zoneBox, zoneCenter } from './layout';
 
 describe('placeDice', () => {
@@ -240,6 +241,17 @@ describe('calloutTop', () => {
 });
 
 describe('rollBall', () => {
+	it("holds the ball on the side each team hits from: the bottom team's left, the top team's right", () => {
+		for (const [team, side] of [['A', -1], ['B', 1]] as const) {
+			const before = newGame(1, NUMBERED);
+			before.phase = { kind: 'set' };
+			before.attack = { team, hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0 };
+			const rolls = [{ team, slot: 'defender' as const, die: 5, label: 'set' as const }];
+			const ball = rollBall(before, rolls, rollPositions(before, rolls));
+			expect(Math.sign(ball.x - zoneCenter(team, 3).x), team).toBe(side);
+		}
+	});
+
 	it('sends the ball straight to the setting spot as the setter gets there', () => {
 		const before = newGame(1, NUMBERED);
 		before.phase = { kind: 'set' };
@@ -300,10 +312,27 @@ describe('previewDefence', () => {
 		g.phase = { kind: 'calls' };
 		g.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0 };
 		// blocking cross leaves the line open, so a deep defender covers the line in 1
-		expect(previewDefence(g, 'cross', 'deep').B).toEqual({ blocker: 2, defender: 1 });
-		expect(previewDefence(g, 'line', 'short').B).toEqual({ blocker: 2, defender: 3 });
+		expect(previewDefence(g, { block: 'cross', stance: 'deep' }).B).toEqual({ blocker: 2, defender: 1 });
+		expect(previewDefence(g, { block: 'line', stance: 'short' }).B).toEqual({ blocker: 2, defender: 3 });
 		// the attackers don't move
-		expect(previewDefence(g, 'line', 'short').A).toEqual(positions(g).A);
+		expect(previewDefence(g, { block: 'line', stance: 'short' }).A).toEqual(positions(g).A);
+	});
+
+	it('in advanced mode, plays a corner on a high ball, stays put on a quick one, and drops off the net to pull off', () => {
+		const advanced = config.advanced;
+		config.advanced = true;
+		try {
+			const g = newGame(1, NUMBERED);
+			g.phase = { kind: 'calls' };
+			g.attack = { team: 'A', hitter: 'blocker', source: 'free', firstDie: 4, firstMod: 0, setDie: 4, setMod: 0 };
+			expect(previewDefence(g, { block: 'cross', stance: 'short' }).B).toEqual({ blocker: 2, defender: 2 });
+			expect(previewDefence(g, { block: 'line', stance: 'short' }).B).toEqual({ blocker: 2, defender: 4 });
+			expect(previewDefence(g, { block: 'line', stance: 'short', blockMode: 'none' }).B).toEqual({ blocker: 3, defender: 6 });
+			g.attack.setMod = 2;
+			expect(previewDefence(g, { block: 'line', stance: 'short' }).B).toEqual({ blocker: 2, defender: 6 });
+		} finally {
+			config.advanced = advanced;
+		}
 	});
 });
 

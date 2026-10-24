@@ -1,12 +1,14 @@
 import { randomChoosers, type Choosers } from './choosers';
+import { rulesInPlay, withRules } from './config';
 import { newGame, playGame, step } from './rally';
-import type { Calls, Game } from './types';
+import type { Calls, Game, Rules } from './types';
 
 /**
  * A game is its seed plus the calls made at each attack. Dice and the computer's calls share one
  * seeded RNG, so the computer's calls aren't replayed as fixed values: that would skip their draws
  * and shift every die after them. Replay lets the computer choose again from the same RNG, which
- * gives the same call, and checks it against the one recorded.
+ * gives the same call, and checks it against the one recorded. In advanced mode a call also has
+ * the hitter's touch and the blocker's block mode (pulling off), when they were asked for.
  */
 export interface RecordedCall extends Calls {
 	/** Which parts the computer chose: the attacking shot, and the block and dig. */
@@ -15,22 +17,27 @@ export interface RecordedCall extends Calls {
 
 export interface GameRecord {
 	seed: number;
+	/** The rules it was played under: replaying under others would play a different game. */
+	rules: Rules;
 	calls: RecordedCall[];
 }
 
 export class ReplayError extends Error {}
 
-/** The calls made in `game` so far, read from its log, with who made each. */
+/** The calls made in `game` so far, under the rules in play, read from its log, with who made each. */
 export function recordGame(game: Game, byComputer: RecordedCall['byComputer'][]): GameRecord {
 	const calls = game.log.filter((e) => e.tag === 'calls').map((e) => e.data!);
 	if (calls.length !== byComputer.length)
 		throw new ReplayError(`${calls.length} calls in the log but ${byComputer.length} records of who made them`);
 	return {
 		seed: game.seed,
+		rules: rulesInPlay(),
 		calls: calls.map((d, i) => ({
 			shot: d.shot as Calls['shot'],
 			block: d.block as Calls['block'],
 			stance: d.stance as Calls['stance'],
+			...(d.touch !== undefined && { touch: d.touch as Calls['touch'] }),
+			...(d.blockMode !== undefined && { blockMode: d.blockMode as Calls['blockMode'] }),
 			byComputer: { ...byComputer[i] }
 		}))
 	};
@@ -44,10 +51,16 @@ export function recordGame(game: Game, byComputer: RecordedCall['byComputer'][])
 function recordedChoosers(record: GameRecord) {
 	let index = -1;
 	const call = () => record.calls[index];
-	const check = <T>(part: string, drawn: T, recorded: T) => {
+	const check = <T>(part: string, drawn: T, recorded: T | undefined) => {
 		if (drawn !== recorded)
 			throw new ReplayError(`call ${index + 1}: the computer's ${part} replays as ${drawn}, recorded ${recorded}`);
 		return drawn;
+	};
+	/** The recorded touch or block mode: a record without it is bad. */
+	const recorded = <K extends 'touch' | 'blockMode'>(part: K): NonNullable<Calls[K]> => {
+		const value = call()[part];
+		if (value === undefined) throw new ReplayError(`call ${index + 1}: no ${part} recorded`);
+		return value as NonNullable<Calls[K]>;
 	};
 	const choosers: Choosers = {
 		shot: (g, team, rng) => {
@@ -59,7 +72,10 @@ function recordedChoosers(record: GameRecord) {
 		block: (g, team, rng) =>
 			call().byComputer.defence ? check('block', randomChoosers.block(g, team, rng), call().block) : call().block,
 		stance: (g, team, rng) =>
-			call().byComputer.defence ? check('stance', randomChoosers.stance(g, team, rng), call().stance) : call().stance
+			call().byComputer.defence ? check('stance', randomChoosers.stance(g, team, rng), call().stance) : call().stance,
+		touch: (g, team, rng) => (call().byComputer.shot ? check('touch', randomChoosers.touch!(g, team, rng), call().touch) : recorded('touch')),
+		blockMode: (g, team, rng) =>
+			call().byComputer.defence ? check('block mode', randomChoosers.blockMode!(g, team, rng), call().blockMode) : recorded('blockMode')
 	};
 	return { choosers, used: () => index + 1, more: () => index + 1 < record.calls.length };
 }
@@ -70,7 +86,14 @@ function recordedChoosers(record: GameRecord) {
  */
 export function replayGame(record: GameRecord): Game {
 	const { choosers, used } = recordedChoosers(record);
-	const g = playGame(newGame(record.seed), choosers);
+	const g = withRules(record.rules, () => {
+		try {
+			return playGame(newGame(record.seed), choosers);
+		} catch (e) {
+			// A recorded call the rules don't allow (a tip on a quick ball, say) is a bad record, not a crash.
+			throw e instanceof ReplayError ? e : new ReplayError((e as Error).message);
+		}
+	});
 	if (g.phase.kind !== 'gameOver') throw new ReplayError('the game never ends');
 	if (used() !== record.calls.length)
 		throw new ReplayError(`the game ended after ${used()} of ${record.calls.length} recorded calls`);
@@ -88,7 +111,8 @@ export function* replaySteps(record: GameRecord): Generator<Game> {
 	yield g;
 	while (g.phase.kind !== 'gameOver') {
 		if (g.phase.kind === 'calls' && !more()) return;
-		g = step(g, choosers);
+		const from = g;
+		g = withRules(record.rules, () => step(from, choosers));
 		yield g;
 	}
 }
@@ -110,15 +134,18 @@ function hash(text: string): string {
 export const FINGERPRINT_SEEDS = 50;
 
 /**
- * Changes whenever the rules or balance change how a game plays out, and not for comments,
+ * Changes whenever `rules` or their balance change how a game plays out, and not for comments,
  * refactors or log wording. Saved games with another fingerprint would replay wrongly, so they're
- * deleted. A change only on a branch none of these games reaches can slip past it.
+ * deleted. Each rule set has its own, so tuning advanced mode keeps the normal games. A change only
+ * on a branch none of these games reaches can slip past it.
  */
-export function rulesFingerprint(seeds = FINGERPRINT_SEEDS): string {
+export function rulesFingerprint(rules: Rules = 'normal', seeds = FINGERPRINT_SEEDS): string {
 	const results: string[] = [];
-	for (let seed = 1; seed <= seeds; seed++) {
-		const g = playGame(newGame(seed));
-		results.push(`${g.score.A}-${g.score.B}:${g.steps}:${g.rngState}`);
-	}
+	withRules(rules, () => {
+		for (let seed = 1; seed <= seeds; seed++) {
+			const g = playGame(newGame(seed));
+			results.push(`${g.score.A}-${g.score.B}:${g.steps}:${g.rngState}`);
+		}
+	});
 	return hash(results.join('|'));
 }
