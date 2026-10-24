@@ -118,7 +118,7 @@ const passSpot = (pos: Positions, team: TeamId, slot: Slot): Zone =>
 /**
  * Where the defending pair stand for a defence: the blocker at the net, the defender on their spot.
  * In advanced mode (`tempo` set) the defender plays a corner, a quick ball leaves them no time to
- * move, and a blocker who stays down drops off the net to dig too.
+ * move, and a blocker who pulls off drops off the net to dig too.
  */
 export function defenceSpots(tempo: Tempo | undefined, d: { block: Channel; stance: Stance; blockMode?: BlockMode }): Record<Slot, Zone> {
 	if (!tempo) return { blocker: 2, defender: defenderZone(d.stance, d.block) };

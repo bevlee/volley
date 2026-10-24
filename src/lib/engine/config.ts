@@ -71,7 +71,7 @@ export const config = {
 		roll: { set: 2, bonus: 0 }
 	} as Record<Touch, { set: number; bonus: number }>,
 	/**
-	 * Advanced mode: against a high ball the blocker can stay down instead of blocking: no block, and
+	 * Advanced mode: against a high ball the blocker can pull off the net instead of blocking: no block, and
 	 * every ball is a close read for the dig, with `noBlockDigBonus` for the help.
 	 */
 	stayDown: true,

@@ -192,7 +192,7 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 				team: other(dug.team),
 				hitter: 'defender',
 				source: 'dig',
-				// Staying down (advanced mode), nobody is on a corner: the defender digs from deep middle.
+				// Pulling off (advanced mode), nobody is on a corner: the defender digs from deep middle.
 				dugAt: dug.calls!.touch && dug.calls!.blockMode === 'none' ? 6 : rules.defenderAt(dug.calls!),
 				firstDie: die,
 				// Libero instincts: a dig that comes up sets up a better attack.
@@ -268,7 +268,7 @@ function advance(g: Game, choosers: Choosers, rng: Rng): void {
 			const stayDown = touch && a.calls.blockMode === 'none';
 			const stanceText = tempo === 'fast' || stayDown ? '' : `, defender ${a.calls.stance}`;
 			log(
-				`Calls · ${a.team} ${attackText}${a.calls.special ? ' (special)' : ''} · ${defending} ${stayDown ? 'stays down' : `blocks ${a.calls.block}`}${stanceText}${a.calls.defenceSpecial ? ` (special ${a.calls.defenceSpecial})` : ''}`,
+				`Calls · ${a.team} ${attackText}${a.calls.special ? ' (special)' : ''} · ${defending} ${stayDown ? 'pulls off' : `blocks ${a.calls.block}`}${stanceText}${a.calls.defenceSpecial ? ` (special ${a.calls.defenceSpecial})` : ''}`,
 				'calls',
 				{
 					...a.calls,

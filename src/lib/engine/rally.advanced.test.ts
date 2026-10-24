@@ -130,7 +130,7 @@ describe('advanced mode rallies', () => {
 		});
 	});
 
-	describe('staying down', () => {
+	describe('pulling off', () => {
 		it('is open against a high ball, and against a quick ball the blocker just blocks', () => {
 			const calls: Calls = { shot: 'line', touch: 'hard', block: 'line', stance: 'deep' };
 			// Pass 4 (±0) and set 4: a high ball. Pass 6 (+2) and set 4: a quick ball.
@@ -141,7 +141,7 @@ describe('advanced mode rallies', () => {
 		it('leaves a hard shot down the line unblocked, and every ball a scramble with the help', () => {
 			// Hard line: 4 + 3 + the setter's (4 + 4) / 2 = 11, aimed 4 + 4 = 8. Dig 4 × 0.5 + 6 + 1 + 2 = 11: up.
 			const g = run(4, { shot: 'line', touch: 'hard', block: 'line', stance: 'short', blockMode: 'none' }, [4, 4, 3, 4, 6]);
-			expect(entries(g, 'calls')[0].text).toContain('stays down');
+			expect(entries(g, 'calls')[0].text).toContain('pulls off');
 			expect(entries(g, 'block')).toHaveLength(0);
 			expect(entries(g, 'dig')[0].data).toMatchObject({ outcome: 'close', total: 11, attack: 11, up: true });
 		});

@@ -29,7 +29,7 @@ function playMixed(seed: number) {
 
 /**
  * The same in advanced mode: the player also picks a touch the set leaves on, and against a high
- * ball whether to block or stay down.
+ * ball whether to block or pull off.
  */
 function playMixedAdvanced(seed: number) {
 	const player = mulberry32(seed * 7919);

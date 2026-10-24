@@ -318,7 +318,7 @@ describe('previewDefence', () => {
 		expect(previewDefence(g, { block: 'line', stance: 'short' }).A).toEqual(positions(g).A);
 	});
 
-	it('in advanced mode, plays a corner on a high ball, stays put on a quick one, and drops off the net to stay down', () => {
+	it('in advanced mode, plays a corner on a high ball, stays put on a quick one, and drops off the net to pull off', () => {
 		const advanced = config.advanced;
 		config.advanced = true;
 		try {

@@ -402,7 +402,7 @@
 
 	const SHOT_KEYS: Record<string, Shot> = { l: 'line', c: 'cross', t: 'tip' };
 
-	/** Advanced mode's keys: where and how to attack (how only on a high ball), and the block, staying down and the dig. */
+	/** Advanced mode's keys: where and how to attack (how only on a high ball), and the block, pulling off and the dig. */
 	const TEMPO_ATTACK_KEYS: Record<string, () => void> = {
 		'1': () => (shotPick = { shot: 'line' }),
 		l: () => (shotPick = { shot: 'line' }),

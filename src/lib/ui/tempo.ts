@@ -83,7 +83,7 @@ const CORNERS: readonly Zone[] = [1, 2, 4, 5];
  * What a defence covers in each zone a shot can land in, from the engine's tables. A quick ball goes
  * hard to the line or cross corner: the block takes one, the other is open. Against a high ball the
  * block takes the hard shot down its channel, and the defender's corner against each other zone is a
- * read, a scramble (one corner off) or open; staying down, every ball is a scramble.
+ * read, a scramble (one corner off) or open; pulling off, every ball is a scramble.
  */
 export function tempoCoverage(tempo: Tempo, d: TempoDefence): ZoneCover[] {
 	const blocked = LANDING[d.block].hard;
@@ -163,7 +163,7 @@ export function tempoReveal(g: Game): Reveal | null {
 	const attackWord = soft ? cap(calls.touch) : 'Hit';
 
 	const blockRow = ((): RevealRow => {
-		const kicker = stayDown ? `${blocker.name} stayed down` : `Block · ${calls.block}`;
+		const kicker = stayDown ? `${blocker.name} pulled off` : `Block · ${calls.block}`;
 		if (stayDown) return { kicker, text: 'No block', note: `+${config.noBlockDigBonus} help on the dig`, good: true };
 		if (block) {
 			const RESULT = { stuff: 'Stuffed it', touch: 'Got a touch', clean: 'Beaten' } as const;

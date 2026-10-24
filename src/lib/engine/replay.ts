@@ -8,7 +8,7 @@ import type { Calls, Game, Rules } from './types';
  * seeded RNG, so the computer's calls aren't replayed as fixed values: that would skip their draws
  * and shift every die after them. Replay lets the computer choose again from the same RNG, which
  * gives the same call, and checks it against the one recorded. In advanced mode a call also has
- * the hitter's touch and the blocker's block mode (stay down), when they were asked for.
+ * the hitter's touch and the blocker's block mode (pulling off), when they were asked for.
  */
 export interface RecordedCall extends Calls {
 	/** Which parts the computer chose: the attacking shot, and the block and dig. */

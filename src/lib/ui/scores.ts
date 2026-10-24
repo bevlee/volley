@@ -245,7 +245,7 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 		};
 	} else if (hit && a.calls) {
 		if (accuracy?.result === 'easy') blockNote = 'Mis-hit: an easy ball over, so no block';
-		else if (touch && a.calls.blockMode === 'none') blockNote = `${defending.blocker.name} stayed down: no block`;
+		else if (touch && a.calls.blockMode === 'none') blockNote = `${defending.blocker.name} pulled off: no block`;
 		else if (soft) blockNote = `A ${softWord} goes over the block`;
 		else if (shot !== a.calls.block) blockNote = `Blocking ${a.calls.block}, so the ${shot} goes around`;
 	}
@@ -291,7 +291,7 @@ export function scoreSheet(g: Game): ScoreSheet | null {
 			});
 		}
 		if (outcome && a.calls?.blockMode === 'none') {
-			digTerms.push({ label: `${defending.blocker.name} stayed down`, value: `${config.noBlockDigBonus}`, note: 'Help on the dig, with no block.' });
+			digTerms.push({ label: `${defending.blocker.name} pulled off`, value: `${config.noBlockDigBonus}`, note: 'Help on the dig, with no block.' });
 		}
 		// A defender who read the call is standing on its target, and a drift comes to them, so they
 		// always dig with full Def as well.

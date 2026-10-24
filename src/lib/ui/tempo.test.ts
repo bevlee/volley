@@ -40,7 +40,7 @@ describe('tempoCoverage', () => {
 		]);
 	});
 
-	it('makes every zone a scramble when the blocker stays down', () => {
+	it('makes every zone a scramble when the blocker pulls off', () => {
 		const covers = tempoCoverage('high', { block: 'line', stance: 'deep', blockMode: 'none' });
 		expect(covers.map((c) => c.cover)).toEqual(['close', 'close', 'close', 'close']);
 	});
@@ -91,7 +91,7 @@ describe('tempoReveal', () => {
 
 	it('shows a stay-down: no block, and both dig', () => {
 		const r = tempoReveal(run(4, { shot: 'cross', touch: 'roll', block: 'line', stance: 'deep', blockMode: 'none' }, [4, 4, 3, 4, 4]))!;
-		expect(r.block).toMatchObject({ kicker: 'B1 stayed down', text: 'No block' });
+		expect(r.block).toMatchObject({ kicker: 'B1 pulled off', text: 'No block' });
 		expect(r.dig).toMatchObject({ kicker: 'Both dig' });
 	});
 

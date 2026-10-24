@@ -105,12 +105,12 @@ export function narrate(e: LogEntry): string {
 	}
 }
 
-/** Advanced mode's calls: the touch, then the block (or staying down), then the defender if they had time to move. */
+/** Advanced mode's calls: the touch, then the block (or pulling off), then the defender if they had time to move. */
 function advancedCalls(d: Data): string {
 	const quick = d.tempo === 'fast';
 	const stayDown = d.blockMode === 'none';
 	const attack = `${d.hitter} ${touchPhrase(d.shot as Channel, d.touch as Touch, quick)}`;
-	const block = stayDown ? `${d.blocker} stays down off the net` : `${d.blocker} takes away the ${d.block}`;
+	const block = stayDown ? `${d.blocker} pulls off the net` : `${d.blocker} takes away the ${d.block}`;
 	const defend = quick ? `${d.defender} has no time to move` : stayDown ? `${d.defender} and ${d.blocker} both dig` : `${d.defender} plays ${d.stance}`;
 	return `${attack} · ${block} · ${defend}`;
 }
@@ -366,12 +366,12 @@ export function playSummary(g: Game): string | null {
 	return `${attack} · ${defence.blocker.name} blocks ${block} · ${defence.defender.name} ${stance}`;
 }
 
-/** Advanced mode's play in one line, e.g. "A1 tips it short down the line, over the block · B1 stays down · B2 deep". */
+/** Advanced mode's play in one line, e.g. "A1 tips it short down the line, over the block · B1 pulls off · B2 deep". */
 function advancedSummary(calls: Calls, hitter: string, blocker: string, defender: string): string {
 	const { shot, block, stance, touch } = calls;
 	const quick = calls.tempo === 'fast';
 	const stayDown = calls.blockMode === 'none';
 	const past = touch !== 'hard' ? 'over the block' : stayDown ? 'no block' : shot === block ? 'into the block' : 'around the block';
 	const attack = `${hitter} ${touchPhrase(shot as Channel, touch!, quick)}, ${past}`;
-	return `${attack} · ${blocker} ${stayDown ? 'stays down' : `blocks ${block}`} · ${defender} ${quick ? 'no time to move' : stance}`;
+	return `${attack} · ${blocker} ${stayDown ? 'pulls off' : `blocks ${block}`} · ${defender} ${quick ? 'no time to move' : stance}`;
 }

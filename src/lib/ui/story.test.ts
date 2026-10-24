@@ -391,10 +391,10 @@ describe('advanced mode', () => {
 		expect(narrate(stepEntries(g).find((e) => e.tag === 'dig')!)).toBe('B2 went the wrong way');
 	});
 
-	it('says when the blocker stays down, and that both dig', () => {
+	it('says when the blocker pulls off, and that both dig', () => {
 		const g = high({ shot: 'cross', touch: 'roll', block: 'line', stance: 'deep', blockMode: 'none' }, [3, 4, 4]);
-		expect(narrate(g.log.find((e) => e.tag === 'calls')!)).toBe('A1 rolls it deep cross-court · B1 stays down off the net · B2 and B1 both dig');
-		expect(playSummary(g)).toBe('A1 rolls it deep cross-court, over the block · B1 stays down · B2 deep');
+		expect(narrate(g.log.find((e) => e.tag === 'calls')!)).toBe('A1 rolls it deep cross-court · B1 pulls off the net · B2 and B1 both dig');
+		expect(playSummary(g)).toBe('A1 rolls it deep cross-court, over the block · B1 pulls off · B2 deep');
 		expect(playerActions(g)['A-blocker']).toEqual({ move: 'tip', label: 'roll!' });
 	});
 

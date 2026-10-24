@@ -243,7 +243,7 @@
 		<rect class="net" x="8" y={VIEW.netY - 4} width={VIEW.width - 16} height="8" />
 		{#if stayDown && defending}
 			{@const net = blockBar(defending, 'line', bottom)}
-			<text class="block-label" x={zoneCenter(defending, 2, bottom).x} y={net.near ? net.y + 16 : net.y - 4}>stays down</text>
+			<text class="block-label" x={zoneCenter(defending, 2, bottom).x} y={net.near ? net.y + 16 : net.y - 4}>pulls off</text>
 		{/if}
 		{#if bar}
 			<rect class="block" x={bar.x} y={bar.y} width={bar.w} height="6" rx="2" />

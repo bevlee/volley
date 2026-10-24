@@ -104,7 +104,7 @@ export function blockModesFor(_blocker: Player): BlockMode[] {
 
 /**
  * How the defending blocker can play the attack now: every mode, with block modes on; in advanced
- * mode with `config.stayDown`, block or stay down against a high ball. Empty when there's no call.
+ * mode with `config.stayDown`, block or pull off against a high ball. Empty when there's no call.
  */
 export function blockModesIn(g: Game): BlockMode[] {
 	const rival = g.attack!.team === 'A' ? 'B' : 'A';

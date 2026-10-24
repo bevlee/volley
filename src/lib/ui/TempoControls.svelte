@@ -5,8 +5,8 @@
 	/**
 	 * Advanced mode's calls, in place of the normal shot and defence buttons. Attacking a quick ball:
 	 * line or cross, both hard. A high ball: where (line or cross) and how (hard, tip or roll), with hard
-	 * drawn weak off a bad set. Defending: the block (line, cross, or staying down against a high ball)
-	 * and, unless the blocker stays down or it's a quick ball, the defender's deep or short.
+	 * drawn weak off a bad set. Defending: the block (line, cross, or pulling off against a high ball)
+	 * and, unless the blocker pulls off or it's a quick ball, the defender's deep or short.
 	 */
 	let {
 		kind,
@@ -139,7 +139,7 @@
 			{/each}
 			{#if !quick}
 				<button class="block" class:on={stayDown} aria-pressed={stayDown} onclick={(e) => run(e, () => (defence.blockMode = 'none'))}>
-					Stay down <kbd>9</kbd>
+					Pull off <kbd>9</kbd>
 				</button>
 			{/if}
 		</div>
